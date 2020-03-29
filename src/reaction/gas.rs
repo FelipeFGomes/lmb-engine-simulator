@@ -64,7 +64,8 @@ impl Gas {
         self.thermo_prop.rho = self.thermo_prop.P/(self.thermo_prop.R*self.thermo_prop.T);
         self.thermo_prop.e = self.thermo_prop.cv*self.thermo_prop.T;
         self.thermo_prop.h = self.thermo_prop.cp*self.thermo_prop.T;
-        self.thermo_prop.s = 0.0;
+        self.thermo_prop.s = self.thermo_prop.cp*(self.thermo_prop.T/298.15).ln() 
+            - self.thermo_prop.R*(self.thermo_prop.P/101325.0).ln();
         self.thermo_prop.a = (self.thermo_prop.k*self.thermo_prop.R*self.thermo_prop.T).sqrt();
         self.thermo_prop.mu = (1.458e-6)*(self.thermo_prop.T*self.thermo_prop.T*self.thermo_prop.T/(self.thermo_prop.T+110.4)).sqrt();
     }
