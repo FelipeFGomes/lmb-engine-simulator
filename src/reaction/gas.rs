@@ -14,6 +14,8 @@ pub struct Gas {
 }
 
 impl Gas {
+
+    /// Creates a `Gas` object from a file 
     pub fn new(gas_file: &str) -> Gas {
         let json_output = json_data::read_and_treat_json(gas_file);
         let mut gas = Gas {
@@ -27,10 +29,65 @@ impl Gas {
         gas.TP(json_output.ini_temp, json_output.ini_press);
         gas
     }
-    
+
+    /// Set temperature and pressure. Thermo properties are recalculated  
+    /// # Examples
+    /// ```
+    /// let temp = 350;
+    /// let press = 2e5;
+    /// gas.TP(temp, press);
+    /// assert_eq!(350, gas.T());
+    /// assert_eq!(2e5, gas.P());
+    /// ```
     pub fn TP(&mut self, temp: f64, press: f64) {
         self.thermo_prop.T = temp;
         self.thermo_prop.P = press;
+        self.calc_prop();
+    }
+
+    /// Set temperature, pressure, and mole fraction of species. Thermo properties are recalculated  
+    /// # Examples
+    /// ```
+    /// let temp = 350;
+    /// let press = 2e5;
+    /// let mol_frac = "O2:0.21, N2:0.79";
+    /// gas.TPX(temp, press, mol_frac);
+    /// assert_eq!(350, gas.T());
+    /// assert_eq!(2e5, gas.P());
+    /// assert_eq!(0.21, gas.X("O2"));
+    /// ```
+    pub fn TPX(&mut self, temp: f64, press: f64, mol_frac: String) {
+        self.thermo_prop.T = temp;
+        self.thermo_prop.P = press;
+        self.X(mol_frac);
+    }
+
+    /// Set mole fraction of species. Thermo properties are recalculated  
+    /// # Examples
+    /// ```
+    /// let mol_frac = "O2:0.21, N2:0.79";
+    /// gas.TP(temp, press);
+    /// assert_eq!(0.21, gas.X("O2"));
+    /// assert_eq!(0.79, gas.X("N2"));
+    /// ```
+    pub fn X(&mut self, mol_frac: String) {
+        let strings: Vec<String> = mol_frac.replace(&[',', '\"'][..], "")
+            .split_whitespace().map(|s| s.to_string()).collect();
+        let mut X = Array::from_elem(self.species.len(), 0.);
+
+        for word in strings.iter() {
+            let specie: Vec<&str> = word.split(":").collect();  // specie should be like ["O2", "0.21"]
+            if self.species.iter().all( |_| self.species.contains(&specie[0].to_string()) ) {
+                let (i, _) = self.species.iter().enumerate().find(|(_, s)| **s == *specie[0]).unwrap();
+                X[i] = specie[1].parse().unwrap();
+            } else {
+                panic!("{} not found in 'speciesArray'", specie[0]);
+            }
+        }
+        if X.sum() != 1.0 {
+            panic!("mol_fraction must sum 1.0: mol_frac = {}", X.sum());
+        }
+        self.mol_frac = X;
         self.calc_prop();
     }
 
@@ -38,8 +95,6 @@ impl Gas {
         let R = 8.3143;
         let T = self.thermo_prop.T;
         let mut cp_species = Array::from_elem(self.species_molar_weight.len(), 0.);
-
-
         for (specie_index, thermo_interp) in self.thermo_interp.iter().enumerate() {
             let polyinterp = thermo_interp.iter().find(|polyinterp| -> bool {
                 polyinterp.Tmin() <= T && T <= polyinterp.Tmax() 
@@ -55,7 +110,6 @@ impl Gas {
             }
         }
         let cv_species = &cp_species - R;
-        println!("{:?}, {:?}", self.mol_frac.shape(), self.species_molar_weight.shape()); 
         self.thermo_prop.M = self.mol_frac.dot( &self.species_molar_weight.t() );
         self.thermo_prop.cp =  self.mol_frac.dot( &(cp_species/self.thermo_prop.M) );
         self.thermo_prop.cv = self.mol_frac.dot( &(cv_species/self.thermo_prop.M) );
@@ -69,7 +123,74 @@ impl Gas {
         self.thermo_prop.a = (self.thermo_prop.k*self.thermo_prop.R*self.thermo_prop.T).sqrt();
         self.thermo_prop.mu = (1.458e-6)*(self.thermo_prop.T*self.thermo_prop.T*self.thermo_prop.T/(self.thermo_prop.T+110.4)).sqrt();
     }
+
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    pub fn species(&self) -> &Vec<String> {
+        &self.species
+    }
+
+    pub fn mol_frac(&self) -> &Array1<f64> {
+        &self.mol_frac
+    }
+
+    pub fn T(&self) -> f64 {
+        self.thermo_prop.T
+    }
+
+    pub fn P(&self) -> f64 {
+        self.thermo_prop.P
+    }
+
+    pub fn rho(&self) -> f64 {
+        self.thermo_prop.rho
+    }
+
+    pub fn cp(&self) -> f64 {
+        self.thermo_prop.cp
+    }
+
+    pub fn cv(&self) -> f64 {
+        self.thermo_prop.cv
+    }
+
+    pub fn R(&self) -> f64 {
+        self.thermo_prop.R
+    }
+
+    pub fn k(&self) -> f64 {
+        self.thermo_prop.k
+    }
+
+    pub fn M(&self) -> f64 {
+        self.thermo_prop.M
+    }
+
+    pub fn e(&self) -> f64 {
+        self.thermo_prop.e
+    }
+
+    pub fn h(&self) -> f64 {
+        self.thermo_prop.h
+    }
+
+    pub fn s(&self) -> f64 {
+        self.thermo_prop.s
+    }
+
+    pub fn a(&self) -> f64 {
+        self.thermo_prop.a
+    }
+
+    pub fn mu(&self) -> f64 {
+        self.thermo_prop.mu
+    }
+    
 }
+
+
 
 #[derive(Debug)]
 struct ThermoProp {

@@ -3,5 +3,5 @@ use lmb::Gas;
 
 fn main() {
     let gas = Gas::new("air_lmb.json");
-    println!("{:?}", gas);
+    println!("pressure = {}", gas.P());
 }
