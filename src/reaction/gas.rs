@@ -64,7 +64,7 @@ impl Gas {
         self.X(mol_frac);
     }
 
-    /// Set mole fraction of species. Thermo properties are recalculated  
+    /// Set mole fraction of species from `&str`. Thermo properties are recalculated  
     /// # Examples
     /// ```
     /// let mol_frac = "O2:0.21, N2:0.79";
@@ -91,6 +91,12 @@ impl Gas {
         }
         self.mol_frac = X;
         self.update_prop();
+    }
+
+    /// Set mole fraction of species from ndarray::Array1<f64>, must be the same size.
+    /// Thermo properties are recalculated
+    pub fn X_array(&mut self, mol_frac: Array1<f64>) {
+        self.mol_frac.assign(&mol_frac);
     }
 
     fn update_prop(&mut self) {
@@ -139,8 +145,8 @@ impl Gas {
         &self.species
     }
 
-    pub fn mol_frac(&self) -> &Array1<f64> {
-        &self.mol_frac
+    pub fn mol_frac(&self) -> ArrayView1<f64> {
+        self.mol_frac.view()
     }
 
     pub fn T(&self) -> f64 {

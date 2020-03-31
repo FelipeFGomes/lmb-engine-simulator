@@ -4,7 +4,7 @@ use std::time::{Instant};
 
 fn main() {
     
-    let mut gas1 = Gas::new("air_cantera.json");
+    let mut gas1 = Gas::new("air.json");
 
     gas1.TPX(450.0, 101325.0, "O2:0.19, N2:0.77, AR:0.04");
     println!("Gas1:");
