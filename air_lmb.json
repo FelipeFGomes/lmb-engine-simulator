@@ -1,10 +1,10 @@
 {
     "phase": {
       "id": "air",
-      "speciesArray": "AR N2 O2",
+      "speciesArray": "O2 N2 AR",
       "state": {
         "temperature":  300.0,
-        "pressure":  100000.0,
+        "pressure":  101325.0,
         "moleFractions": "O2:0.21, N2:0.79"
       }
     },

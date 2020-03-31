@@ -3,6 +3,7 @@
 //! The `lmb_engine_simulator` crate provides an easy way to simulate engines and 1D gas dynamics.
 
 pub mod reaction;
+pub mod base;
 
 // Re-exporting
 pub use crate::reaction::gas::Gas;
