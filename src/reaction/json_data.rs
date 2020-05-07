@@ -3,9 +3,9 @@
 #![allow(unused_variables)]
 #![allow(non_snake_case)]
 
-use serde::{Deserialize, Serialize};
+use crate::reaction::thermo::ThermoInterp;
 use ndarray::prelude::*;
-use crate::reaction::thermo::{ThermoInterp};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct IdealGas {
@@ -48,32 +48,40 @@ impl PolynomInterp {
         match poly {
             Some(t) => {
                 if t.len() > 2 {
-                    panic!("Specie {} must have only two temperature ranges", specie_name);
+                    panic!(
+                        "Specie {} must have only two temperature ranges",
+                        specie_name
+                    );
                 }
                 if t[0].len != t[1].len {
-                    panic!("Specie {} must have coefficiets with the same size", specie_name);
+                    panic!(
+                        "Specie {} must have coefficiets with the same size",
+                        specie_name
+                    );
                 }
-            },
-            None => panic!("For {}, no thermo data detected in the file", specie_name)
+            }
+            None => panic!("For {}, no thermo data detected in the file", specie_name),
         }
     }
-    fn poly_interp_to_therm_interp(mut poly: Vec<PolynomInterp>, specie_name: &str) -> ThermoInterp {
+    fn poly_interp_to_therm_interp(
+        mut poly: Vec<PolynomInterp>,
+        specie_name: &str,
+    ) -> ThermoInterp {
         if poly[0].Tmax != poly[1].Tmin {
-            panic!("For specie {}, discontinuity temperature range in the polynomial", specie_name);
+            panic!(
+                "For specie {}, discontinuity temperature range in the polynomial",
+                specie_name
+            );
         } else {
             let Tmid = poly[0].Tmax;
-            let coeffs_low = Array::from( poly[0].coeffs.take().unwrap() );
-            let coeffs_high = Array::from( poly[1].coeffs.take().unwrap() );
-            let thermo = ThermoInterp::new(specie_name.to_string(),
-                                            Tmid,
-                                            coeffs_low,
-                                            coeffs_high,);
+            let coeffs_low = Array::from(poly[0].coeffs.take().unwrap());
+            let coeffs_high = Array::from(poly[1].coeffs.take().unwrap());
+            let thermo = ThermoInterp::new(specie_name.to_string(), Tmid, coeffs_low, coeffs_high);
             thermo.validate();
             thermo
         }
     }
 }
-
 
 #[derive(Debug)]
 pub struct OutputJson {
@@ -85,7 +93,6 @@ pub struct OutputJson {
     pub species_molar_weight: Array1<f64>,
     pub thermo_interp: Vec<ThermoInterp>,
 }
-
 
 pub fn read_and_treat_json(file_name: &str) -> OutputJson {
     // Reading .json file
@@ -107,13 +114,15 @@ pub fn read_and_treat_json(file_name: &str) -> OutputJson {
         thermo_interp,
     }
 }
-    
-    
 
 fn get_species(gas: &IdealGas) -> Vec<String> {
     let name = gas.phase.id.clone();
-    let species: Vec<String> = gas.phase.speciesArray.split_whitespace().map(|s| s.to_string()).collect();
-    
+    let species: Vec<String> = gas
+        .phase
+        .speciesArray
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
     // Checking if file is appropriate
     if species.len() > gas.species_data.len() {
         panic!("not enough data for the species in 'speciesArray'");
@@ -130,12 +139,23 @@ fn get_ini_state(gas: &IdealGas) -> (f64, f64) {
 fn get_mol_frac(gas: &IdealGas, species: &Vec<String>) -> Array1<f64> {
     let mut mol_frac = Array::from_elem(species.len(), 0.);
     let strings = gas.phase.state.moleFractions.clone();
-    let strings: Vec<String> = strings.replace(&[',', '\"'][..], "").split_whitespace().map(|s| s.to_string()).collect();
+    let strings: Vec<String> = strings
+        .replace(&[',', '\"'][..], "")
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
 
     for word in strings.iter() {
-        let specie: Vec<&str> = word.split(":").collect();  // specie should be like ["O2", "0.21"]
-        if species.iter().all( |n| species.contains(&specie[0].to_string()) ) {
-            let (i, _) = species.iter().enumerate().find(|(i, s)| **s == *specie[0]).unwrap();
+        let specie: Vec<&str> = word.split(":").collect(); // specie should be like ["O2", "0.21"]
+        if species
+            .iter()
+            .all(|n| species.contains(&specie[0].to_string()))
+        {
+            let (i, _) = species
+                .iter()
+                .enumerate()
+                .find(|(i, s)| **s == *specie[0])
+                .unwrap();
             mol_frac[i] = specie[1].parse().unwrap();
         } else {
             panic!("{} not found in 'speciesArray'", specie[0]);
@@ -155,8 +175,10 @@ fn get_thermo(mut gas: IdealGas, species: &Vec<String>) -> (Array1<f64>, Vec<The
             if *data.name == *specie_name {
                 molecular_weight[index] = data.molecular_weight;
                 PolynomInterp::validade(&data.thermo, &species[index]);
-                let thermo_interp = 
-                    PolynomInterp::poly_interp_to_therm_interp(data.thermo.take().unwrap(), &species[index]);
+                let thermo_interp = PolynomInterp::poly_interp_to_therm_interp(
+                    data.thermo.take().unwrap(),
+                    &species[index],
+                );
                 thermo_interp.validate();
                 thermo_interp_array.push(thermo_interp);
             }
@@ -164,4 +186,3 @@ fn get_thermo(mut gas: IdealGas, species: &Vec<String>) -> (Array1<f64>, Vec<The
     }
     (molecular_weight, thermo_interp_array)
 }
-

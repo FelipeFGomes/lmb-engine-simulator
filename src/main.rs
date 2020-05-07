@@ -1,29 +1,38 @@
-use lmb_engine_simulator as lmb;
+#![allow(unused_variables)]
+
 use lmb::Gas;
-use std::time::{Instant};
+use lmb_engine_simulator as lmb;
+use std::f64::consts::PI;
+use std::io::Write;
+
+// use std::time::Instant;
 
 fn main() {
+    let gas = Gas::new("air.json");
+    // gas.TP(300.0, 100000.0);
+    let mut builder = lmb::SystemBuilder::new();
+    builder.add_environment("env_1", &gas);
+    builder.add_environment("env_2", &gas);
+    builder.add_engine("engine.json", &gas);
+    builder.connect_from_to("valve_intake", "env_1");
+    builder.connect_from_to("valve_exhaust", "env_2");
     
-    let mut gas1 = Gas::new("air.json");
+    let mut system = builder.build_system();
 
-    gas1.TPX(450.0, 101325.0, "O2:0.19, N2:0.77, AR:0.04");
-    println!("Gas1:");
-    println!("enthalpy = {}", gas1.h());
-    println!("internal energy = {}", gas1.e());
-    println!("entropy = {}", gas1.s());
-    println!("cp = {}", gas1.cp());
-    println!("mean mol. weight = {}", gas1.M());
+    let speed = 3000.0/60.0; // [RPS]
+    let sec_to_rad = 2.0*PI*speed;
+    let d_angle = 0.01; // [CA deg]
+    let dt = (d_angle*PI/180.0)/sec_to_rad;
+    let num_cycles = 10.0;
+    let limit  = (num_cycles*(720.0/d_angle)).round();
 
-    // let mut gas2 = Gas::new("air_lmb.json"); 
-    // gas2.TP(1000.0, 100000.0);
-    // println!("Gas2:");
-    // println!("enthalpy = {}", gas2.h());
-    // println!("entropy = {}", gas2.s());
-    // println!("cp = {}", gas2.cp());
-    // println!("k = {}", gas2.cp()/gas2.cv());
+    for _ in 0..limit as usize {
+        system.advance(dt);
+    }
 
-    // println!("Difference:");
-    // println!("enthalpy = {}", gas1.h() - gas2.h());
-    // println!("entropy = {}", gas1.s() - gas2.s());
+    let first = system.stored_data.len() - (720.0/d_angle) as usize;
+    let final_cycle = &system.stored_data[first..];
+    let mut file = std::fs::File::create("result").expect("Error opening writing file");
+    write!(file, "{}", final_cycle.join("")).expect("Unable to write data");
 
 }

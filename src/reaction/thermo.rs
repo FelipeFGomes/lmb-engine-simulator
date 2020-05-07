@@ -2,7 +2,7 @@
 
 use ndarray::prelude::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ThermoInterp {
     specie: String,
     Tmid: f64,
@@ -11,16 +11,16 @@ pub struct ThermoInterp {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ThermoProp {
-    pub P: f64,   // pressure
-    pub T: f64,   // temperature
-    pub rho: f64, // density
-    pub cp: f64,  // specific heat capacity - cp
-    pub cv: f64,  // specific heat capacity - cv
+    pub P: f64,   // pressure [Pa]
+    pub T: f64,   // temperature [K]
+    pub rho: f64, // density [kg/m^3]
+    pub cp: f64,  // specific heat capacity - cp [J/(kg.K)]
+    pub cv: f64,  // specific heat capacity - cv [J/(kg.K)]
     pub R: f64,   // ideal gas constant [J/(kg.K)]
     pub k: f64,   // cp/cv
-    pub M: f64,   // molecular weight
+    pub M: f64,   // molecular weight 
     pub e: f64,   // internal energy
     pub h: f64,   // enthalpy
     pub s: f64,   // entropy
@@ -92,7 +92,7 @@ impl ThermoInterp {
         self.Tmid
     }
 
-    pub fn specie(&self) -> &str {
+    pub fn _specie(&self) -> &str {
         &self.specie
     }
 

@@ -1,1 +1,1 @@
-# Add description
+# Module for the mechanical parts of an internal combustion engine.

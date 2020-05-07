@@ -1,0 +1,36 @@
+{
+    "speed": 3000.0,
+    "eccentricity": 0.0,
+    "conrod": 145.6,
+    "displacement": 400.0,
+    "cylinders_diameter": 80.0,
+    "firing_order": "1",
+    "cylinders": [
+        {
+            "name": "cyl_1",
+            "compression_ratio": 12.5
+        }
+    ],
+    "valves": [
+        {
+            "name": "valve_intake",
+            "valve_type": "intake",
+            "opening_angle": 340.0,
+            "closing_angle": 570.0,
+            "diameter": 40.0,
+            "max_lift": 10.0,
+            "connecting": "cyl_1"
+        },
+        {
+            "name": "valve_exhaust",
+            "valve_type": "exhaust",
+            "opening_angle": 130.0,
+            "closing_angle": 375.0,
+            "diameter": 40.0,
+            "max_lift": 10.0,
+            "connecting": "cyl_1"
+        }
+    ]
+}
+
+
