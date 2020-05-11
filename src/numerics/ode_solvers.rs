@@ -1,5 +1,9 @@
+//! Solver for system of ordinary differential equations (ODE) 
+
 use ndarray::*;
 
+/// Integrates a system of ODEs over a single time step using 4th order Runge-Kutta
+/// 
 /// `x` is the initial condition store in a 1D-ndarray form, `c` is a Vec<f64> with constant values of the problem 
 /// 
 /// # Examples 
@@ -29,6 +33,7 @@ pub fn rk4_step<F>(f: F, x: &Array1<f64>, c: &Vec<f64>, t: &f64, step: f64) -> A
     f_out
 }
 
+/// Integrates a system of ODEs over a single time step using explicit Euler method
 pub fn euler_step<F>(f: F, x: &Array1<f64>, c: &Vec<f64>, t: &f64, step: f64) -> Array1<f64> 
     where
     F: Fn(&f64, &Array1<f64>, &Vec<f64>) -> Array1<f64>,

@@ -3,35 +3,34 @@
 //! The `lmb_engine_simulator` crate provides an easy way to simulate engines and 1D gas dynamics.
 //! 
 //! This library employed the **Builder Pattern** so the user feels as she/he is acctually building
-//! an engine system. To construct the system (or build), the struct `SystemBuilder` 
-//! is used to add the desired components. After finishing building, the method `build_system` can
-//! be used to return an object `System` which is used for the numerical solutions. 
+//! an engine system. To construct (build) the system, the struct `SystemBuilder` 
+//! is used to add the desired components. After finishing building, the method `build_system()` can
+//! be used to return an object `System` which is used to solve the components numerically. 
 //! 
 //! # Example
 //! ```
 //! let gas = Gas::new("air.json");
 //! let mut builder = lmb::SystemBuilder::new();
 //! builder
-//!     .add_reservoir("res_1", &gas, 0.5)  // object name, gas inside, volume
-//!     .add_environment("exhaust_env", &gas); // object name, gas inside
+//!     .add_reservoir("res_1", &gas, 0.5)      // object name, gas inside, volume
+//!     .add_environment("exhaust_env", &gas);  // object name, gas inside
 //! let system = builder.build_system();
 //! ```
 
 use std::ops::Add;
 use ndarray::*;
 
-mod base;
-mod connector;
-mod core;
-mod engine;
-mod numerics;
-mod one_dim;
-mod reaction;
-mod zero_dim;
+pub mod base;
+pub mod connector;
+pub mod core;
+pub mod engine;
+pub mod numerics;
+pub mod one_dim;
+pub mod reaction;
+pub mod zero_dim;
 
 // Re-exporting
 pub use crate::core::system_builder::SystemBuilder;
-pub use crate::numerics::ode_solvers;
 pub use crate::reaction::gas::Gas;
 
 // Object's type. 'String' meant to store the name of the object
