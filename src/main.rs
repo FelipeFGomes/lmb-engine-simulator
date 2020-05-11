@@ -1,38 +1,35 @@
-#![allow(unused_variables)]
+#![allow(unused_variables, unused_imports)]
 
 use lmb::Gas;
 use lmb_engine_simulator as lmb;
 use std::f64::consts::PI;
-use std::io::Write;
-
-// use std::time::Instant;
+use std::time::Instant;
 
 fn main() {
     let gas = Gas::new("air.json");
-    // gas.TP(300.0, 100000.0);
     let mut builder = lmb::SystemBuilder::new();
-    builder.add_environment("env_1", &gas);
-    builder.add_environment("env_2", &gas);
-    builder.add_engine("engine.json", &gas);
-    builder.connect_from_to("valve_intake", "env_1");
-    builder.connect_from_to("valve_exhaust", "env_2");
-    
+    builder
+        .add_reservoir("intake_env", &gas, 0.5)
+        .add_reservoir("exhaust_env", &gas, 0.5)
+        .add_engine("engine.json", &gas)
+        .connect_from_to("valve_intake_1", "intake_env")
+        .connect_from_to("valve_exhaust_1", "exhaust_env")
+        .connect_from_to("valve_intake_2", "intake_env")
+        .connect_from_to("valve_exhaust_2", "exhaust_env")
+        .connect_from_to("valve_intake_3", "intake_env")
+        .connect_from_to("valve_exhaust_3", "exhaust_env");
     let mut system = builder.build_system();
 
-    let speed = 3000.0/60.0; // [RPS]
-    let sec_to_rad = 2.0*PI*speed;
-    let d_angle = 0.01; // [CA deg]
-    let dt = (d_angle*PI/180.0)/sec_to_rad;
-    let num_cycles = 10.0;
-    let limit  = (num_cycles*(720.0/d_angle)).round();
+    // Calculating
+    let now = Instant::now(); //measuring time
+    system.advance_to_steady_state();
+    println!("time taken: {:?}", now.elapsed());
 
-    for _ in 0..limit as usize {
-        system.advance(dt);
-    }
-
-    let first = system.stored_data.len() - (720.0/d_angle) as usize;
-    let final_cycle = &system.stored_data[first..];
-    let mut file = std::fs::File::create("result").expect("Error opening writing file");
-    write!(file, "{}", final_cycle.join("")).expect("Unable to write data");
+    // writing to file
+    system.write_to_file("cyl_1.txt", "cyl_1");
+    system.write_to_file("cyl_2.txt", "cyl_2");
+    system.write_to_file("cyl_3.txt", "cyl_3");
+    system.write_to_file("intake_env.txt", "intake_env");
+    system.write_to_file("exhaust_env.txt", "intake_env");
 
 }

@@ -1,7 +1,7 @@
 use crate::numerics::ode_solvers as ode;
 use crate::reaction::gas::Gas;
 use crate::zero_dim::zero_core::ZeroDim;
-use crate::{BasicProperties, FlowRatio};
+use crate::{BasicProperties, FlowRatio, StoreData};
 use ansi_term::Style;
 use ndarray::*;
 use std::f64::consts::PI;
@@ -23,6 +23,7 @@ pub struct Cylinder {
     heat_transfer: HeatTransfer,
     combustion: Combustion,
     flow_ratio: FlowRatio,
+    store_data: StoreData,
     // blow_by: bool,
     // crevice: bool,
 }
@@ -65,6 +66,7 @@ impl Cylinder {
             area: geometry.transverse_area,
         };
         let (volume, _) = Cylinder::calc_volume(&geometry, &crankshaft, ini_angle.to_radians());
+        let header = "crank-angle [deg]\tpressure [bar]\ttemperature [K]\tvolume [cm³]\tmass [mg]";
         Ok(Cylinder {
             name,
             gas: gas.clone(),
@@ -80,6 +82,7 @@ impl Cylinder {
             heat_transfer: HeatTransfer {},
             combustion: Combustion {},
             flow_ratio: FlowRatio::new(),
+            store_data: StoreData::new(header, 5)
         })
     }
     /// Returns the instant volume and volume's derivative with crank angle radian, respectively.
@@ -175,12 +178,11 @@ impl Cylinder {
         // setting up the run 
         let d_angle:f64 = 0.01; // [CA deg]
         let limit = (180.0 / d_angle) as i32;
-        let mut result: Vec<String> = Vec::new();
         let d_angle = d_angle.to_radians();
         let pvk = self.gas.P()*self.volume.powf(self.gas.k());
         let k = self.gas.k();
         println!("initial PV^K = {}", pvk);
-        result.push(format!("crank-angle\ttemperature\tpressure\tvolume\tmass\n"));
+        self.store_data.add_data(array![self.angle, self.gas.P()/1e5, self.gas.T(), self.volume*1e6, self.mass*1e3]);
         for _ in 0..limit {
             let new_prop = self.closed_phase(d_angle);
             let temp = new_prop.0;
@@ -197,12 +199,10 @@ impl Cylinder {
             self.gas.TP(temp, press);
             self.mass = mass;
             self.volume = vol;
-
-            result.push(self._get_main_properties());
+            self.store_data.add_data(array![self.angle, self.gas.P()/1e5, self.gas.T(), self.volume*1e6, self.mass*1e3]);
         }
-        let mut file = std::fs::File::create(self.name()).expect("Error opening writing file");
-        write!(file, "{}", result.join("")).expect("Unable to write data");
         println!("max P = {}", pvk/self.volume.powf(k));
+        self.write_to_file(self.name(), (0, (limit - 1) as usize), None);
     }
 
     pub fn _test_volume(&mut self) {
@@ -257,21 +257,54 @@ impl ZeroDim for Cylinder {
         self.gas.TP(temp, press);
         self.mass = mass;
         self.volume = vol;
+
+        // Storing data
+        self.store_data.add_data(array![self.angle.to_degrees(), self.gas.P()/1e5, self.gas.T(), self.volume*1e6, self.mass*1e3]);
     }
 
     fn update_flow_ratio(&mut self, total_flow_ratio: FlowRatio) {
         self.flow_ratio = total_flow_ratio;
     }
 
-    fn _get_main_properties(&self) -> String {
-        format!(
-            "{:.2}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\n",
-            self.angle.to_degrees(),
-            self.gas.T(),
-            self.gas.P(),
-            self.volume*1e6,
-            self.mass,
-        )
+    fn write_to_file(
+        &self,
+        file_name: &str,
+        index_range: (usize, usize),
+        additional_data: Option<(String, ArrayView2<f64>)>,
+    ) {
+        let data: ArrayView2<f64>;
+        let tmp: Array2<f64>;
+        let mut extra_header = String::from("");
+        let filtered_data = self
+            .store_data
+            .data
+            .slice(s![index_range.0..index_range.1, ..]);
+        if let Some((header, add)) = additional_data {
+            if filtered_data.nrows() != add.nrows() {
+                println!("`additional_data` must have the same number of rows as the writable data");
+                println!(" `additional_data`: {}, writable data: {}", add.len(), filtered_data.len());
+                std::process::exit(1);
+            }
+            tmp = stack![Axis(1), add, filtered_data];
+            data = tmp.view();
+            extra_header = header.to_string();
+        } else {
+            data = filtered_data;
+        }
+        let num_cols = data.ncols() - 1;
+        let data: Vec<String> = data
+            .indexed_iter()
+            .map(|((_, j), d)| -> String {
+                if j < num_cols {
+                    format!("{:.6}", d) + "\t"
+                } else {
+                    format!("{:.6}", d) + "\n"
+                }
+            })
+            .collect();
+        let mut file = std::fs::File::create(file_name).expect("Error opening writing file");
+        write!(file, "{}\t{}\n", extra_header, self.store_data.header).expect("Unable to write data");
+        write!(file, "{}", data.join("")).expect("Unable to write data");
     }
 }
 

@@ -5,6 +5,7 @@ use crate::{BasicProperties, FlowRatio};
 pub struct Environment {
     name: String,
     gas: Gas,
+    _mass: f64,
 }
 
 impl Environment {
@@ -12,6 +13,7 @@ impl Environment {
         Ok(Environment {
             name,
             gas: gas.clone(),
+            _mass: std::f64::INFINITY,
         })
     } 
 }
@@ -32,11 +34,4 @@ impl ZeroDim for Environment {
     }
     fn advance(&mut self, _: f64) {}
     fn update_flow_ratio(&mut self, _: FlowRatio) {}
-    fn _get_main_properties(&self) -> String {
-        format!(
-            "{}\t{}\n",
-            self.gas.T(),
-            self.gas.P(),
-        )
-    }
 }

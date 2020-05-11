@@ -2,6 +2,7 @@ use crate::reaction::gas::Gas;
 use crate::zero_dim::cylinder::Cylinder;
 use crate::zero_dim::zero_core::ZeroDim;
 use crate::connector::valve::Valve;
+use std::f64::consts::PI;
 use serde::{Deserialize, Serialize};
 use serde_json;
 
@@ -10,12 +11,13 @@ pub struct Engine {
     speed: f64,
     eccentricity: f64,
     firing_order: String,
-    pub cylinders: Vec<Cylinder>,
-    pub valves: Vec<Valve>
+    sec_to_rad: f64,
 }
 
+type EngineOutput = Result<(Engine, Vec<Cylinder>, Vec<Valve>), String>;
+
 impl Engine {
-    pub fn new(file_name: &str, gas: &Gas) -> Result<Engine, String> {
+    pub fn new(file_name: &str, gas: &Gas) -> EngineOutput {
         let json_engine = match Engine::reading_json(file_name) {
             Ok(i) => i,
             Err(err) => {
@@ -84,15 +86,18 @@ impl Engine {
                 cyl,
             )?);
         }
-
-        Ok(Engine {
+        let engine = Engine {
             speed: json_engine.speed,
             eccentricity: json_engine.eccentricity,
             firing_order: json_engine.firing_order.clone(),
-            cylinders,
-            valves,
-        })
+            sec_to_rad: 2.0 * PI * json_engine.speed / 60.0,
+        };
+        Ok( (engine, cylinders, valves) )
     }
+
+    pub fn sec_to_rad(&self) -> f64 {
+        self.sec_to_rad
+    } 
 
     fn reading_json(file_name: &str) -> serde_json::Result<JsonEngine> {
         let json_file = std::fs::read_to_string(file_name).expect("Unable to read file");
