@@ -2,7 +2,20 @@
 //!
 //! The `lmb_engine_simulator` crate provides an easy way to simulate engines and 1D gas dynamics.
 //! 
+//! This library employed the **Builder Pattern** so the user feels as she/he is acctually building
+//! an engine system. To construct the system (or build), the struct `SystemBuilder` 
+//! is used to add the desired components. After finishing building, the method `build_system` can
+//! be used to return an object `System` which is used for the numerical solutions. 
 //! 
+//! # Example
+//! ```
+//! let gas = Gas::new("air.json");
+//! let mut builder = lmb::SystemBuilder::new();
+//! builder
+//!     .add_reservoir("res_1", &gas, 0.5)  // object name, gas inside, volume
+//!     .add_environment("exhaust_env", &gas); // object name, gas inside
+//! let system = builder.build_system();
+//! ```
 
 use std::ops::Add;
 use ndarray::*;
