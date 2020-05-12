@@ -1,10 +1,11 @@
 #![allow(non_snake_case)]
 
 use super::conn_core::Connector;
-use crate::{BasicProperties, FlowRatio};
+use crate::{BasicProperties, FlowRatio, StoreData};
 use crate::zero_dim::cylinder::Cylinder;
 use crate::zero_dim::zero_core::ZeroDim;
 use std::io::Write;
+use ndarray::*;
 // use crate::ObjectType;
 
 #[derive(Debug)]
@@ -18,6 +19,7 @@ pub struct Valve {
     valve_lift: ValveLift,
     flow_ratio: Vec<(String, FlowRatio)>,
     connecting: Vec<String>,
+    store_data: StoreData,
 }
 
 impl Valve {
@@ -41,7 +43,8 @@ impl Valve {
         connecting.push( cylinder.name().to_string() );
         flow_ratio.push( (cylinder.name().to_string(), FlowRatio::new()) );
         let valve_lift = ValveLift::new(max_lift_diam_ratio, time_opened);
-        
+        let header = "crank-angle [deg]\tmass flow [kg/s]\tenthalpy flow [J/s]\tthroat area [cm²]";
+
         Ok(Valve {
             name,
             opening_angle,
@@ -52,6 +55,7 @@ impl Valve {
             valve_lift,
             flow_ratio,
             connecting,
+            store_data: StoreData::new(header, 4),
         })
     }
     
@@ -133,7 +137,6 @@ impl Connector for Valve {
         }
         Ok(())
     }
-
     fn update_flow_ratio(&mut self, prop: Vec<BasicProperties>, _: f64) {
 
         if prop.len() != 2 {
@@ -167,6 +170,10 @@ impl Connector for Valve {
             thoat_area = self.calc_throat_area(angle);
         } else {
             self.set_flow_to_zero();
+            self.store_data.add_data(array![crank_angle, 
+                self.flow_ratio[0].1.mass_flow, 
+                self.flow_ratio[0].1.enthalpy_flow,
+                0.0]);
             return
         }
         // checking flow diretion
@@ -181,6 +188,10 @@ impl Connector for Valve {
             i_down = 0;
         } else {
             self.set_flow_to_zero();
+            self.store_data.add_data(array![crank_angle, 
+                self.flow_ratio[0].1.mass_flow, 
+                self.flow_ratio[0].1.enthalpy_flow,
+                0.0]);
             return;
         }
 
@@ -236,17 +247,26 @@ impl Connector for Valve {
         self.flow_ratio[i].1.mass_flow = -self.flow_ratio[ii].1.mass_flow;
         self.flow_ratio[i].1.enthalpy_flow = -self.flow_ratio[ii].1.enthalpy_flow;
 
-        // let msg = format!("`{}`:\n {:?}", self.name(), self.flow_ratio);
-        // println!("{}", msg);
-        // println!("P_up = {}, P_down = {}", P_up, P_down);
+        // storing data 
+        self.store_data.add_data(array![crank_angle, 
+            self.flow_ratio[0].1.mass_flow, 
+            self.flow_ratio[0].1.enthalpy_flow,
+            thoat_area*1e4]);
         
     }
-
     fn get_flow_ratio<'a>(&'a self, elem_name: &str) -> Result<&'a FlowRatio, String> {
         match self.flow_ratio.iter().find(|(obj_name, _)| obj_name == elem_name) {
             Some((_, data)) => Ok(data),
             None => Err(format!("object '{}' was not found in '{}'", elem_name, self.name())),
         }
+    }
+    fn write_to_file(
+        &self,
+        file_name: &str,
+        range: (usize, usize),
+        extra_data: Option<(String, ArrayView2<f64>)>,
+    ) {
+        self.store_data.write_to_file(file_name, range, extra_data);
     }
 }
 

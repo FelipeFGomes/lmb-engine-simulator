@@ -9,8 +9,8 @@ fn main() {
     let gas = Gas::new("air.json");
     let mut builder = lmb::SystemBuilder::new();
     builder
-        .add_reservoir("intake_env", &gas, 0.5)
-        .add_reservoir("exhaust_env", &gas, 0.5)
+        .add_environment("intake_env", &gas)
+        .add_environment("exhaust_env", &gas)
         .add_engine("engine.json", &gas)
         .connect_from_to("valve_intake_1", "intake_env")
         .connect_from_to("valve_exhaust_1", "exhaust_env")
@@ -29,7 +29,7 @@ fn main() {
     system.write_to_file("cyl_1.txt", "cyl_1");
     system.write_to_file("cyl_2.txt", "cyl_2");
     system.write_to_file("cyl_3.txt", "cyl_3");
-    system.write_to_file("intake_env.txt", "intake_env");
-    system.write_to_file("exhaust_env.txt", "intake_env");
+    system.write_to_file("valve_intake.txt", "valve_intake_1");
+    system.write_to_file("valve_exhaust.txt", "valve_exhaust_1");
 
 }

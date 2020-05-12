@@ -167,17 +167,17 @@ impl System {
                 ObjectType::ZeroDim => self.zero_dim[*index].write_to_file(
                     file_name,
                     (self.cycle_start, self.iterations_counter),
-                    Some(("time [s]".to_string(), time)),
+                    Some(("time [s]\t".to_string(), time)),
                 ),
                 ObjectType::OneDim => self.one_dim[*index].write_to_file(
                     file_name,
-                    (0, self.iterations_counter),
+                    (self.cycle_start, self.iterations_counter),
                     None,
                 ),
                 ObjectType::Connector => self.connector[*index].write_to_file(
                     file_name,
-                    (0, self.iterations_counter),
-                    None,
+                    (self.cycle_start, self.iterations_counter),
+                    Some(("time [s]\t".to_string(), time)),
                 ),
             }
         } else {

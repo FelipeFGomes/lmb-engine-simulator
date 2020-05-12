@@ -18,6 +18,7 @@
 //! ```
 
 use std::ops::Add;
+use std::io::Write;
 use ndarray::*;
 
 pub mod base;
@@ -135,6 +136,45 @@ impl StoreData {
         self.last_index = 0;
         self
     }
+
+    /// Write the stored data in `data` limited by the index `range`to a file,
+    ///  the first line is the content in `header`. 
+    pub fn write_to_file( &self,
+        file_name: &str,
+        range: (usize, usize),
+        additional_data: Option<(String, ArrayView2<f64>)>) 
+        {
+            let data: ArrayView2<f64>;
+            let tmp: Array2<f64>;
+            let mut additional_header = String::from("");
+            let filtered_data = self.data.slice(s![range.0..range.1, ..]);
+            if let Some((header, add)) = additional_data {
+                if filtered_data.nrows() != add.nrows() {
+                    println!("`additional_data` must have the same number of rows as the writable data");
+                    println!(" `additional_data`: {}, writable data: {}", add.len(), filtered_data.len());
+                    std::process::exit(1);
+                }
+                tmp = stack![Axis(1), add, filtered_data];
+                data = tmp.view();
+                additional_header = header.to_string();
+            } else {
+                data = filtered_data;
+            }
+            let num_cols = data.ncols() - 1;
+            let data: Vec<String> = data
+                .indexed_iter()
+                .map(|((_, j), d)| -> String {
+                    if j < num_cols {
+                        format!("{:.6}", d) + "\t"
+                    } else {
+                        format!("{:.6}", d) + "\n"
+                    }
+                })
+                .collect();
+            let mut file = std::fs::File::create(file_name).expect("Error opening writing file");
+            write!(file, "{}{}\n", additional_header, self.header).expect("Unable to write data");
+            write!(file, "{}", data.join("")).expect("Unable to write data");
+        }
 }
 
 #[cfg(test)]
