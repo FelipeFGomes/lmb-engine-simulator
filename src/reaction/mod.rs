@@ -2,3 +2,4 @@
 pub mod gas;
 mod json_data;
 mod thermo;
+pub mod combustion;

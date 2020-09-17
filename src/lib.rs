@@ -18,8 +18,8 @@
 //! ```
 
 use std::ops::Add;
-use std::io::Write;
 use ndarray::*;
+use std::io::Write;
 
 pub mod base;
 pub mod connector;
@@ -33,16 +33,18 @@ pub mod zero_dim;
 // Re-exporting
 pub use crate::core::system_builder::SystemBuilder;
 pub use crate::reaction::gas::Gas;
+pub use crate::engine::engine::Engine;
 
-// Object's type. 'String' meant to store the name of the object
-#[derive(Debug, PartialEq)]
+// Object's type
+#[derive(Debug, Clone)]
 pub enum ObjectType {
     ZeroDim,
     OneDim,
     Connector,
+    Cylinder,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]   
 pub struct BasicProperties<'a> {
     pub name: &'a str,
     pub pressure: f64,    // Pa
@@ -76,7 +78,7 @@ impl<'a> std::fmt::Display for BasicProperties<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FlowRatio {
     pub mass_flow: f64,     // kg/s
     pub enthalpy_flow: f64, // J/s
@@ -111,7 +113,7 @@ impl<'a, 'b> Add<&'b FlowRatio> for &'a FlowRatio {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StoreData {
     header: String,
     data: Array2<f64>,
@@ -119,7 +121,7 @@ pub struct StoreData {
 }
 
 impl StoreData {
-    pub fn new(header: &str, num_variables: usize) -> StoreData {
+    fn new(header: &str, num_variables: usize) -> StoreData {
         StoreData {
             header: header.to_string(),
             data: Array::from_elem( (500000, num_variables), 0.),
@@ -127,19 +129,29 @@ impl StoreData {
         }
     }
 
-    pub fn add_data(&mut self, data: Array1<f64>) {
+    fn add_data(&mut self, data: Array1<f64>) {
         self.data.row_mut(self.last_index).assign(&data);
         self.last_index += 1;
     }
 
-    pub fn reset_index<'a>(&'a mut self) -> &'a mut Self {
+    fn get_data(&self, rows_range: (usize, usize), columns: Vec<usize>) -> Array2<f64> {
+        let mut data: Array2<f64> = Array2::zeros((rows_range.1 - rows_range.0, columns.len()));
+        for (i, col) in columns.iter().enumerate() {
+            let filtered_data = self.data.slice(s![rows_range.0..rows_range.1, *col]);
+            data.slice_mut(s![.., i]).assign(&filtered_data);
+        }
+        data
+    }
+
+    fn reset_data(&mut self) {
+        let num_variables = self.data.ncols();
+        self.data = Array::from_elem( (500000, num_variables), 0.);
         self.last_index = 0;
-        self
     }
 
     /// Write the stored data in `data` limited by the index `range`to a file,
     ///  the first line is the content in `header`. 
-    pub fn write_to_file( &self,
+    fn write_to_file( &self,
         file_name: &str,
         range: (usize, usize),
         additional_data: Option<(String, ArrayView2<f64>)>) 
@@ -176,6 +188,26 @@ impl StoreData {
             write!(file, "{}", data.join("")).expect("Unable to write data");
         }
 }
+
+#[derive(Debug, Clone)]
+pub struct ObjectInfo {
+    pub name: String,
+    pub obj_type: ObjectType,
+    pub index: usize,
+    pub stored_data: StoreData,
+}
+
+impl ObjectInfo {
+    pub fn new(name: String, obj_type: ObjectType, index: usize, stored_data: StoreData) -> ObjectInfo {
+        ObjectInfo {
+            name,
+            obj_type,
+            index,
+            stored_data,
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

@@ -1,25 +1,28 @@
 #![allow(non_snake_case)]
 
-use super::conn_core::Connector;
-use crate::{BasicProperties, FlowRatio, StoreData};
+use crate::core::traits::{Conn, Connector, SaveData, ZeroDim};
 use crate::zero_dim::cylinder::Cylinder;
-use crate::zero_dim::zero_core::ZeroDim;
-use std::io::Write;
+use crate::{BasicProperties, FlowRatio};
 use ndarray::*;
+use std::io::Write;
+use std::rc::Rc;
 // use crate::ObjectType;
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct Valve {
     name: String,
+    angle: f64,
     opening_angle: f64,
     closing_angle: f64,
     delta_angle: f64,
     diameter: f64,
+    area: f64,
     max_lift: f64,
+    discharge_coeff: Rc<dyn Fn(f64, f64, f64, &str) -> f64>,
     valve_lift: ValveLift,
+    throat_area: f64,
     flow_ratio: Vec<(String, FlowRatio)>,
     connecting: Vec<String>,
-    store_data: StoreData,
 }
 
 impl Valve {
@@ -38,30 +41,51 @@ impl Valve {
         } else {
             delta_angle
         };
-        let mut flow_ratio:Vec<(String, FlowRatio)> = Vec::new();
+        let mut flow_ratio: Vec<(String, FlowRatio)> = Vec::new();
         let mut connecting: Vec<String> = Vec::new();
-        connecting.push( cylinder.name().to_string() );
-        flow_ratio.push( (cylinder.name().to_string(), FlowRatio::new()) );
+        connecting.push(cylinder.name().to_string());
+        flow_ratio.push((cylinder.name().to_string(), FlowRatio::new()));
         let valve_lift = ValveLift::new(max_lift_diam_ratio, time_opened);
-        let header = "crank-angle [deg]\tmass flow [kg/s]\tenthalpy flow [J/s]\tthroat area [cm²]";
-
+        let discharge_coeff = Rc::new(Valve::default_discharge_coeff);
         Ok(Valve {
             name,
+            angle: 0.0,
             opening_angle,
             closing_angle,
             delta_angle,
             diameter,
+            area: 0.25*std::f64::consts::PI*diameter*diameter,
+            discharge_coeff,
             max_lift,
             valve_lift,
+            throat_area: 0.0,
             flow_ratio,
             connecting,
-            store_data: StoreData::new(header, 4),
         })
     }
-    
-    fn calc_throat_area(&self, angle: f64) -> f64 {
-        let lift_diam = self.valve_lift.calc_lift(angle);
+
+    fn default_discharge_coeff(lift_diam: f64, area:f64, throat_area: f64, direction: &str) -> f64 {
+        if throat_area < 1e-10 {
+            return 0.0;
+        }
+        if direction == "forward" {
+            let cd_norm = 7.060033E+01 * lift_diam.powi(4) 
+                + -5.348961E+01*lift_diam.powi(3)
+                + 8.324442E+00*lift_diam.powi(2)
+                + 2.341224E+00*lift_diam;
+            cd_norm*area/throat_area
+        } else {
+            let cd_norm = 5.848379E+01*lift_diam.powi(4) 
+                + -4.168971E+01*lift_diam.powi(3)
+                + 4.793636E+00*lift_diam.powi(2)
+                + 2.759528E+00*lift_diam;
+            cd_norm*area/throat_area
+        }
+    }
+
+    fn calc_throat_area(&self, lift_diam: f64) -> f64 {
         let lift = lift_diam * self.diameter;
+        
         if lift_diam <= 0.125 {
             2.22144146908 * lift * (self.diameter + 0.5 * lift)
         } else if lift_diam <= 0.274049 {
@@ -86,15 +110,16 @@ impl Valve {
         } else {
             if chank_angle < self.opening_angle || chank_angle > self.closing_angle {
                 false
-            }
-            else {
+            } else {
                 true
             }
         }
     }
 
     fn set_flow_to_zero(&mut self) {
-        self.flow_ratio.iter_mut().for_each(|(_, flow)| *flow = FlowRatio::new() );
+        self.flow_ratio
+            .iter_mut()
+            .for_each(|(_, flow)| *flow = FlowRatio::new());
     }
 
     pub fn _test_valve_area_and_lift(&self) {
@@ -110,49 +135,57 @@ impl Valve {
                 let delta = angle as f64 - self.opening_angle;
                 let angle_cam = if delta >= 0.0 { delta } else { delta + 720.0 };
                 if angle == 340 {
-                    let _a=0;
+                    let _a = 0;
                 }
-                area = self.calc_throat_area(angle_cam);
-                lift = self.valve_lift.calc_lift(angle_cam)*self.diameter;
+                let lift_diam = self.valve_lift.calc_lift(angle_cam);
+                area = self.calc_throat_area(lift_diam);
+                lift =  lift_diam * self.diameter;
             } else {
                 area = 0.0;
                 lift = 0.0;
             }
-            result.push(format!("{}\t{}\t{}\n", angle, area*1e6, lift*1e3));
-        } 
+            result.push(format!("{}\t{}\t{}\n", angle, area * 1e6, lift * 1e3));
+        }
         write!(file, "{}", result.join("")).expect("Unable to write data");
     }
 }
 
 impl Connector for Valve {
-    fn name<'a>(&'a self) -> &'a str {&self.name}
-    fn connecting<'a>(&'a self) -> &'a Vec<String> {&self.connecting}
-    fn connect_to(&mut self, elem_name: &str) -> Result<(),String> {
+    fn name<'a>(&'a self) -> &'a str {
+        &self.name
+    }
+    fn connecting<'a>(&'a self) -> &'a Vec<String> {
+        &self.connecting
+    }
+    fn connect_to(&mut self, elem_name: &str) -> Result<(), String> {
         self.connecting.push(elem_name.to_string());
-        self.flow_ratio.push( (elem_name.to_string(), FlowRatio::new()) );
+        self.flow_ratio
+            .push((elem_name.to_string(), FlowRatio::new()));
         if self.connecting.len() != 2 {
-            return Err(
-                format!("Wrong the number of connections. Valve should connect only two elements"),
-            );
+            return Err(format!(
+                "Wrong the number of connections. Valve should connect only two elements"
+            ));
         }
         Ok(())
     }
     fn update_flow_ratio(&mut self, prop: Vec<BasicProperties>, _: f64) {
-
         if prop.len() != 2 {
             println!("Error at Valve::update_flow_ratio:");
-            println!(" need BasicProperties from two objects: getting {}", prop.len());
+            println!(
+                " need BasicProperties from two objects: getting {}",
+                prop.len()
+            );
             println!(" objects are: ");
             for obj in prop.iter() {
-                    print!(" '{}'", obj.name);
+                print!(" '{}'", obj.name);
             }
             std::process::exit(1)
         }
 
-        let mut crank_angle = std::f64::NAN; 
+        let mut crank_angle = std::f64::NAN;
         for info in prop.iter() {
             match info.crank_angle {
-                Some(angle) => { crank_angle = angle },
+                Some(angle) => crank_angle = angle,
                 None => {}
             }
         }
@@ -162,19 +195,21 @@ impl Connector for Valve {
         }
 
         let crank_angle = crank_angle.to_degrees();
-        let thoat_area: f64; 
+        self.angle = crank_angle;
+        let thoat_area: f64;
+        let lift_diam: f64; // lift/diam
         // checking if valve is open
         if self.is_open(crank_angle) {
             let delta = crank_angle - self.opening_angle;
             let angle = if delta >= 0.0 { delta } else { delta + 720.0 };
-            thoat_area = self.calc_throat_area(angle);
+            lift_diam = self.valve_lift.calc_lift(angle);
+            thoat_area = self.calc_throat_area(lift_diam);
+            self.throat_area = thoat_area;
         } else {
             self.set_flow_to_zero();
-            self.store_data.add_data(array![crank_angle, 
-                self.flow_ratio[0].1.mass_flow, 
-                self.flow_ratio[0].1.enthalpy_flow,
-                0.0]);
-            return
+            thoat_area = 0.0;
+            self.throat_area = thoat_area;
+            return;
         }
         // checking flow diretion
         let i_up: usize;
@@ -188,10 +223,6 @@ impl Connector for Valve {
             i_down = 0;
         } else {
             self.set_flow_to_zero();
-            self.store_data.add_data(array![crank_angle, 
-                self.flow_ratio[0].1.mass_flow, 
-                self.flow_ratio[0].1.enthalpy_flow,
-                0.0]);
             return;
         }
 
@@ -205,17 +236,30 @@ impl Connector for Valve {
         let km = k - 1.0;
         let P_du = P_down / P_up;
         let m_dot: f64;
+        
+        let direction = if prop[i_down].name == self.connecting[0] { //self.connecting[0] is cylinder
+            "forward"
+        } else {
+            "backward"
+        };
+        //discharge_coeff( lift_diam: f64, area:f64, throat_area: f64, direction: &str )
+        let cd = (self.discharge_coeff)( lift_diam, self.area, thoat_area, direction );
+        // println!("cd: {}", cd);
         // estimating mass flow
         if P_du > (2.0 / kp).powf(k / km) {
-            m_dot = thoat_area * P_up / (R * T_up).sqrt()
+            m_dot = cd * thoat_area * P_up / (R * T_up).sqrt()
                 * (2.0 * k / km * (P_du.powf(2.0 / k) - P_du.powf(kp / k))).sqrt();
         } else {
             // chocked flow: independent of downstream pressure
-            m_dot = thoat_area * P_up / (R * T_up).sqrt() * (k * (2.0 / kp).powf(kp / km)).sqrt();
+            m_dot = cd * thoat_area * P_up / (R * T_up).sqrt() * (k * (2.0 / kp).powf(kp / km)).sqrt();
         }
 
         // updating `flow_ratio` for upstream objects
-        let i = match self.flow_ratio.iter().position(|(name,_)| *name == prop[i_up].name) {
+        let i = match self
+            .flow_ratio
+            .iter()
+            .position(|(name, _)| *name == prop[i_up].name)
+        {
             Some(i) => i,
             None => {
                 println!("Error at Valve::update_flow_ratio:");
@@ -229,10 +273,14 @@ impl Connector for Valve {
         };
         let ii = i; // store the position to use in the downstream
         self.flow_ratio[i].1.mass_flow = -m_dot;
-        self.flow_ratio[i].1.enthalpy_flow = -m_dot*k*R/km*prop[i_up].temperature;
+        self.flow_ratio[i].1.enthalpy_flow = -m_dot * k * R / km * prop[i_up].temperature;
 
         // updating `flow_ratio` for downstream objects
-        let i = match self.flow_ratio.iter().position(|(name,_)| *name == prop[i_down].name) {
+        let i = match self
+            .flow_ratio
+            .iter()
+            .position(|(name, _)| *name == prop[i_down].name)
+        {
             Some(i) => i,
             None => {
                 println!("Error at Valve::update_flow_ratio:");
@@ -246,31 +294,62 @@ impl Connector for Valve {
         };
         self.flow_ratio[i].1.mass_flow = -self.flow_ratio[ii].1.mass_flow;
         self.flow_ratio[i].1.enthalpy_flow = -self.flow_ratio[ii].1.enthalpy_flow;
-
-        // storing data 
-        self.store_data.add_data(array![crank_angle, 
-            self.flow_ratio[0].1.mass_flow, 
-            self.flow_ratio[0].1.enthalpy_flow,
-            thoat_area*1e4]);
-        
     }
     fn get_flow_ratio<'a>(&'a self, elem_name: &str) -> Result<&'a FlowRatio, String> {
-        match self.flow_ratio.iter().find(|(obj_name, _)| obj_name == elem_name) {
+        match self
+            .flow_ratio
+            .iter()
+            .find(|(obj_name, _)| obj_name == elem_name)
+        {
             Some((_, data)) => Ok(data),
-            None => Err(format!("object '{}' was not found in '{}'", elem_name, self.name())),
+            None => Err(format!(
+                "object '{}' was not found in '{}'",
+                elem_name,
+                self.name()
+            )),
         }
-    }
-    fn write_to_file(
-        &self,
-        file_name: &str,
-        range: (usize, usize),
-        extra_data: Option<(String, ArrayView2<f64>)>,
-    ) {
-        self.store_data.write_to_file(file_name, range, extra_data);
     }
 }
 
-#[derive(Debug)]
+impl SaveData for Valve {
+    fn get_headers(&self) -> String {
+        "crank-angle [deg]\tmass flow [kg/s]\tenthalpy flow [J/s]\tthroat area [cm²]".to_string()
+    }
+    fn num_storable_variables(&self) -> usize {
+        4
+    }
+    fn get_storable_data(&self) -> Array1<f64> {
+        array![
+            self.angle,
+            self.flow_ratio[0].1.mass_flow,
+            self.flow_ratio[0].1.enthalpy_flow,
+            self.throat_area * 1e4
+        ]
+    }
+}
+
+// impl Clone for Valve {
+//     fn clone(&self) -> Self {
+//         Valve{
+//             name: self.name.clone(),
+//             angle: self.angle,
+//             opening_angle: self.opening_angle,
+//             closing_angle: self.closing_angle,
+//             delta_angle: self.delta_angle,
+//             diameter: self.diameter,
+//             max_lift: self.max_lift,
+//             discharge_coeff: self.discharge_coeff.clone(),
+//             valve_lift: ValveLift,
+//             throat_area: f64,
+//             flow_ratio: Vec<(String, FlowRatio)>,
+//             connecting: Vec<String>,
+//         }
+//     }
+// }
+
+impl Conn for Valve {}
+
+#[derive(Debug, Clone)]
 struct ValveLift {
     time_opened: f64, //in crank angle degree
     acceler_ratio: f64,
@@ -301,7 +380,7 @@ impl ValveLift {
         }
     }
 
-    /// Calculate valve lift over diameter, `L/D`. `angle` must be in the relative angle in degrees: `theta - opening_angle`
+    /// Calculate valve lift over diameter, `L/D`. `angle` must be relative angle in crank-angle degrees: `theta - opening_angle`
     fn calc_lift(&self, angle: f64) -> f64 {
         if angle <= self.intervals[0] {
             self.consts[0] * angle * angle
@@ -312,5 +391,3 @@ impl ValveLift {
         }
     }
 }
-
-

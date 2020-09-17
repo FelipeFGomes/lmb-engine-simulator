@@ -1,78 +1,52 @@
 {
-    "speed": 3000.0,
+    "speed": 7500.0,
     "eccentricity": 0.0,
-    "conrod": 145.6,
-    "displacement": 400.0,
-    "cylinders_diameter": 80.0,
-    "firing_order": "1-2-3",
+    "conrod": 58.2,
+    "displacement": 26.2,
+    "bore": 32.0,
+    "firing_order": "1",
+    "combustion": {
+        "model": "Two-zone model",        
+        "comb_ini": 710.0,
+        "wiebe": {
+            "m": 1.535,
+            "a": 6.60,
+            "comb_duration": 70.0
+        }
+    },
+    "injector": {
+        "inj_type": "port",
+        "air_fuel_ratio": 0.896,
+        "fuel": {
+            "name": "C8H18",
+            "state": "liquid",
+            "lhv": 42.7e06,
+            "heat_vap": 420.0e3
+        }
+    },
     "cylinders": [
         {
             "name": "cyl_1",
-            "compression_ratio": 12.5
-        },
-        {
-            "name": "cyl_2",
-            "compression_ratio": 12.5
-        },
-        {
-            "name": "cyl_3",
-            "compression_ratio": 12.5
-        }
-    ],
-    "valves": [
-        {
-            "name": "valve_intake_1",
-            "valve_type": "intake",
-            "opening_angle": 340.0,
-            "closing_angle": 570.0,
-            "diameter": 40.0,
-            "max_lift": 10.0,
-            "connecting": "cyl_1"
-        },
-        {
-            "name": "valve_exhaust_1",
-            "valve_type": "exhaust",
-            "opening_angle": 130.0,
-            "closing_angle": 375.0,
-            "diameter": 40.0,
-            "max_lift": 10.0,
-            "connecting": "cyl_1"
-        },
-        {
-            "name": "valve_intake_2",
-            "valve_type": "intake",
-            "opening_angle": 340.0,
-            "closing_angle": 570.0,
-            "diameter": 40.0,
-            "max_lift": 10.0,
-            "connecting": "cyl_2"
-        },
-        {
-            "name": "valve_exhaust_2",
-            "valve_type": "exhaust",
-            "opening_angle": 130.0,
-            "closing_angle": 375.0,
-            "diameter": 40.0,
-            "max_lift": 10.0,
-            "connecting": "cyl_2"
-        },
-        {
-            "name": "valve_intake_3",
-            "valve_type": "intake",
-            "opening_angle": 340.0,
-            "closing_angle": 570.0,
-            "diameter": 40.0,
-            "max_lift": 10.0,
-            "connecting": "cyl_3"
-        },
-        {
-            "name": "valve_exhaust_3",
-            "valve_type": "exhaust",
-            "opening_angle": 130.0,
-            "closing_angle": 375.0,
-            "diameter": 40.0,
-            "max_lift": 10.0,
-            "connecting": "cyl_3"
+            "compression_ratio": 8.5,
+            "wall_temperature": 470.0,
+            "intake_valves": [
+                {
+                    "name": "valve_int",
+                    "opening_angle": 285.0,
+                    "closing_angle": 630.0,
+                    "diameter": 9.3,
+                    "max_lift": 3.4
+                }
+            ],
+            "exhaust_valves": [
+                {   
+                    "name": "valve_exh",
+                    "opening_angle": 90.0,
+                    "closing_angle": 435.0,
+                    "diameter": 9.3,
+                    "max_lift": 3.4
+                }
+            ]
         }
     ]
 }

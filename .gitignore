@@ -1,3 +1,5 @@
 /target
 **/*.rs.bk
 Cargo.lock
+/EB2_FAPESP_E95_results
+/Ryobi_26_results

@@ -1,5 +1,6 @@
+use ndarray::*;
 use crate::reaction::gas::Gas;
-use crate::zero_dim::zero_core::{ZeroDim};
+use crate::core::traits::{ZeroDim, SaveData, ZeroD};
 use crate::{BasicProperties, FlowRatio};
 
 pub struct Environment {
@@ -33,5 +34,17 @@ impl ZeroDim for Environment {
         }
     }
     fn advance(&mut self, _: f64) {}
-    fn update_flow_ratio(&mut self, _: FlowRatio) {}
+    fn update_flow_ratio(&mut self, _: Vec<(&str, &FlowRatio)>) {}
 }
+
+impl SaveData for Environment {
+    fn get_headers(&self) -> String {
+        "pressure [bar]\ttemperature [K]".to_string()
+    }
+    fn num_storable_variables(&self) -> usize {2}
+    fn get_storable_data(&self) -> Array1<f64> {
+        array![self.gas.P()/1e5, self.gas.T()]
+    }
+}
+
+impl ZeroD for Environment {}

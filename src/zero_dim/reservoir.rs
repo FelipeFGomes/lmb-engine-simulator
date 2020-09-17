@@ -1,6 +1,6 @@
 use crate::reaction::gas::Gas;
-use crate::zero_dim::zero_core::{ZeroDim};
-use crate::{BasicProperties, FlowRatio, StoreData};
+use crate::core::traits::{ZeroDim, SaveData, ZeroD};
+use crate::{BasicProperties, FlowRatio};
 use crate::numerics::ode_solvers as ode;
 use ndarray::*;
 
@@ -10,7 +10,6 @@ pub struct Reservoir {
     volume: f64,
     mass: f64,
     flow_ratio: FlowRatio,
-    store_data: StoreData,
 }
 
 impl Reservoir {
@@ -19,14 +18,13 @@ impl Reservoir {
         if volume <= 0.0 {
             return Err("`volume` must be greater than zero");
         }
-        let header = "pressure [bar]\ttemperature [K]\tmass [kg]";
+        
         Ok( Reservoir {
             name,
             gas: gas.clone(),
             volume,
             mass: gas.P()*volume/(gas.R()*gas.T()),
             flow_ratio: FlowRatio::new(),
-            store_data: StoreData::new(header, 3),
         } )
     }
 }
@@ -73,19 +71,22 @@ impl ZeroDim for Reservoir {
         self.gas.TP(temp, press);
         self.mass = mass;
         
-        // storing data
-        self.store_data.add_data(array![self.gas.P()/1e5, self.gas.T(), self.mass]);
     }
-    fn update_flow_ratio(&mut self, total_flow_ratio: FlowRatio) {
-        self.flow_ratio = total_flow_ratio;
-    }
-    fn write_to_file(
-        &self,
-        file_name: &str,
-        index_range: (usize, usize),
-        additional_data: Option<(String, ArrayView2<f64>)>,
-    ) 
-    {
-        self.store_data.write_to_file(file_name, index_range, additional_data);
+    fn update_flow_ratio(&mut self, total_flow_ratio: Vec<(&str, &FlowRatio)>) {
+        let mut flow_ratio = FlowRatio::new();
+        total_flow_ratio.iter().for_each(|(_,f)| flow_ratio = &flow_ratio + *f);
+        self.flow_ratio = flow_ratio;
     }
 }
+
+impl SaveData for Reservoir {
+    fn get_headers(&self) -> String {
+        "pressure [bar]\ttemperature [K]\tmass [kg]".to_string()
+    }
+    fn num_storable_variables(&self) -> usize {3}
+    fn get_storable_data(&self) -> Array1<f64> {
+        array![self.gas.P()/1e5, self.gas.T(), self.mass]
+    }
+}
+
+impl ZeroD for Reservoir {}

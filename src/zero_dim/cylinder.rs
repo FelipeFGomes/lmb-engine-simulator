@@ -1,13 +1,14 @@
 use crate::numerics::ode_solvers as ode;
 use crate::reaction::gas::Gas;
-use crate::zero_dim::zero_core::ZeroDim;
-use crate::{BasicProperties, FlowRatio, StoreData};
+use crate::reaction::combustion::{Combustion};
+use crate::engine::engine::{JsonEngine, JsonCylinder, JsonValve, Injector};
+use crate::core::traits::{ZeroDim, SaveData, ZeroD};
+use crate::{BasicProperties, FlowRatio};
 use ansi_term::Style;
 use ndarray::*;
 use std::f64::consts::PI;
 use std::io::Write;
 
-#[derive(Debug)]
 pub struct Cylinder {
     name: String,
     gas: Gas,
@@ -15,15 +16,20 @@ pub struct Cylinder {
     volume: f64,     // [m³] - instant volume as function of crank angle
     angle: f64,      // [CA deg] - instant crank angle
     speed: f64,      // [RPS]
+    fuel_mass: f64,  // [kg]
     sec_to_rad: f64, // constant: 2*PI*speed
     geometry: Geometry,
     crankshaft: Crankshaft,
     piston: Piston,
     head: Head,
     heat_transfer: HeatTransfer,
-    combustion: Combustion,
-    flow_ratio: FlowRatio,
-    store_data: StoreData,
+    injector: Option<Injector>,
+    combustion: Box<dyn Combustion>,
+    int_valves: ValvesInfo,
+    exh_valves: ValvesInfo,
+    store_species: bool,
+    total_injected_fuel: f64,
+    total_fresh_charge: f64,
     // blow_by: bool,
     // crevice: bool,
 }
@@ -32,30 +38,33 @@ impl Cylinder {
     /// Creates a cylinder object. Inputs units must be: `mm`, `RPM` and `CA deg`.
     pub fn new(
         name: String,
-        diam: f64,
-        displ: f64,
-        comp_ratio: f64,
-        conrod: f64,
-        speed: f64,
         ini_angle: f64,
-        eccentricity: f64,
+        engine_info: &JsonEngine,
+        cylinder_info: &JsonCylinder,
+        int_valves_info: &Vec<JsonValve>,
+        exh_valves_info: &Vec<JsonValve>,
+        combustion: Box<dyn Combustion>,
+        injector: Option<Injector>,
         gas: &Gas,
     ) -> Result<Cylinder, String> {
-        if diam < 0.0 {
+        if engine_info.bore < 0.0 {
             return Err(format!("diameter cannot be lower than zero"));
-        } else if displ < 0.0 {
+        } else if engine_info.displacement < 0.0 {
             return Err(format!("displacement cannot be lower than zero"));
-        } else if comp_ratio < 0.0 {
+        } else if cylinder_info.compression_ratio < 0.0 {
             return Err(format!("compration ratio cannot be lower than zero"));
-        } else if speed < 0.0 {
+        } else if engine_info.speed < 0.0 {
             return Err(format!("engine speed cannot be lower than zero"));
         }
 
         // In SI uinits
-        let conrod = conrod * 1e-3; // [m]
-        let eccentricity = eccentricity * 1e-3; // [m]
-        let diam = diam * 1e-3; // [m]
-        let wall_temp = 520.0; // [K] - Common value
+        let speed = engine_info.speed;
+        let conrod = engine_info.conrod * 1e-3; // [m]
+        let eccentricity = engine_info.eccentricity * 1e-3; // [m]
+        let diam = engine_info.bore * 1e-3; // [m]
+        let displ = engine_info.displacement;
+        let comp_ratio = cylinder_info.compression_ratio;
+        let wall_temp = cylinder_info.wall_temperature; // [K] - Common value
         let geometry = Geometry::new(diam, displ * 1e-6, comp_ratio, wall_temp);
         let crank = 0.5 * geometry.stroke; //standard value
         let angle_tdc = (eccentricity / (conrod + crank)).asin(); // crank angle [deg] of the top-dead-center
@@ -66,7 +75,22 @@ impl Cylinder {
             area: geometry.transverse_area,
         };
         let (volume, _) = Cylinder::calc_volume(&geometry, &crankshaft, ini_angle.to_radians());
-        let header = "crank-angle [deg]\tpressure [bar]\ttemperature [K]\tvolume [cm³]\tmass [mg]";
+
+        // instantiating valves
+        let intake_gas_comp = "O2:0.21, N2:0.79".to_string();
+        let exhaust_gas_comp = "N2:0.662586, H2O:0.202449, CO2:0.134965".to_string();
+        let mut intake_valves_info = Vec::new();
+        let mut exhaust_valves_info = Vec::new();
+        for v in int_valves_info {
+            intake_valves_info.push(ValveBasicInfo::new(v.name.clone(), v.opening_angle, v.closing_angle))
+        }
+        for v in exh_valves_info {
+            exhaust_valves_info.push(ValveBasicInfo::new(v.name.clone(), v.opening_angle, v.closing_angle))
+        }
+
+        let int_valves = ValvesInfo::new(intake_valves_info, intake_gas_comp.clone());
+        let exh_valves = ValvesInfo::new(exhaust_valves_info, exhaust_gas_comp.clone());
+
         Ok(Cylinder {
             name,
             gas: gas.clone(),
@@ -74,15 +98,20 @@ impl Cylinder {
             volume,
             angle: (ini_angle.to_radians() - crankshaft.angle_tdc),
             speed: speed / 60.0,
+            fuel_mass: 0.0,
             sec_to_rad: 2.0 * PI * speed / 60.0,
             geometry,
             crankshaft,
             piston,
             head,
             heat_transfer: HeatTransfer {},
-            combustion: Combustion {},
-            flow_ratio: FlowRatio::new(),
-            store_data: StoreData::new(header, 5)
+            combustion,
+            injector,
+            int_valves,
+            exh_valves,
+            store_species: false,
+            total_injected_fuel: 0.0,
+            total_fresh_charge: 0.0,
         })
     }
     /// Returns the instant volume and volume's derivative with crank angle radian, respectively.
@@ -105,22 +134,42 @@ impl Cylinder {
     }
 
     /// `d_angle` in crank angle radians
-    fn closed_phase(&mut self, d_angle: f64) -> (f64, f64, f64, f64 ) {
+    fn closed_phase(&mut self, d_angle: f64) -> (f64, f64, f64, f64, Array1<f64>) {
         // Closed Phase -----------------------------------------------------------
-        let heat_combustion = self.combustion.calculate();
-        let const_1 = (self.gas.k() - 1.0) / (self.mass * self.gas.R());
-        
+        if let Some(inj) = &mut self.injector {
+            if inj.inj_type() == "port" {
+                if self.fuel_mass == 0.0 {
+                    self.fuel_mass = inj.injected_fuel();
+                    self.total_injected_fuel = self.fuel_mass;
+                    self.total_fresh_charge = 0.0;
+                } else {
+                    inj.set_injected_fuel(0.0);
+                }
+            } else if inj.inj_type() == "direct" {
+                if self.fuel_mass == 0.0 {
+                    self.fuel_mass = inj.calc_direct_injected_fuel(0.0);
+                    self.total_injected_fuel = self.fuel_mass;
+                    self.total_fresh_charge = 0.0;
+                } else {
+                    inj.set_injected_fuel(0.0);
+                }
+            }
+        }
+
+        let heat_combustion = self.combustion.get_heat_release_rate(&self.gas, self.fuel_mass, self.angle);
+        let const_1 = 1.0 / (self.mass * self.gas.cv());
         let closed_phase_equations = |angle: &f64, x: &Array1<f64>, _: &Vec<f64>| -> Array1<f64> {
-            // x[0] = P, x[1] = T
+            // x[0] = P
             let (vol, d_vol) = Cylinder::calc_volume(&self.geometry, &self.crankshaft, *angle);    
-            let heat_transfer = self.heat_transfer.calculate(vol, x[1], x[0], &self); // [J/s]
+            let temp = x[0]*vol/(self.mass*self.gas.R());
+            let heat_transfer = self.heat_transfer.calculate(vol, temp, x[0], &self); // [J/s]
             let heat_transfer = heat_transfer / self.sec_to_rad; // [J/CA radian]
             let d_temp = const_1 * (heat_combustion + heat_transfer - x[0] * d_vol); // [K/CA radian]
-            let d_press = x[0] * (d_temp / x[1] - d_vol / vol); // [Pa/CA radian]
-            array![d_press, d_temp]
+            let d_press = x[0] * (d_temp / temp - d_vol / vol); // [Pa/CA radian]
+            array![d_press]
         };
+        let ini = array![self.gas.P()];
 
-        let ini = array![self.gas.P(), self.gas.T()];
         let closed_phase_integrated = ode::rk4_step(
             closed_phase_equations,
             &ini,
@@ -129,30 +178,36 @@ impl Cylinder {
             d_angle,
         );
 
-        let press = closed_phase_integrated[0];
-        let temp = closed_phase_integrated[1];        
+        // let temp = closed_phase_integrated[0];  
+        let press = closed_phase_integrated[0];       
         let (vol, _) = Cylinder::calc_volume(&self.geometry, &self.crankshaft, self.angle + d_angle);
-        ( temp, press, self.mass, vol )
+        let temp = press*vol/(self.mass*self.gas.R());
+
+        // Estimating final compositions:
+        let mole_frac = self.combustion.update_composition(&mut self.gas, self.mass, self.angle + d_angle, press, vol);
+        ( temp, press, self.mass, vol, mole_frac )
     }
 
     /// `d_angle` in crank angle radians
-    fn open_phase(&mut self, d_angle: f64) -> (f64, f64, f64, f64 ) {
+    fn open_phase(&mut self, d_angle: f64) -> (f64, f64, f64, f64, Array1<f64>) {
         // Open Phase -----------------------------------------------------------
-        let cv = self.gas.R() / (self.gas.k() - 1.0);
+        let cv = self.gas.cv();
         let cv_inv = 1.0 / cv;
+        let mass_flow = (self.int_valves.flow_info.mass_flow + self.exh_valves.flow_info.mass_flow) / self.sec_to_rad; // [kg/CA radian]
+        let enthalpy_flow = (self.int_valves.flow_info.enthalpy_flow + self.exh_valves.flow_info.enthalpy_flow) / self.sec_to_rad; // [J/kg/CA radian]
         let open_phase_equations = |angle: &f64, x: &Array1<f64>, _: &Vec<f64>| -> Array1<f64> {
             //x[0] = temperature, x[1] = mass
             let (vol, d_vol) = Cylinder::calc_volume(&self.geometry, &self.crankshaft, *angle);
             let press = x[1] * self.gas.R() * x[0] / vol;
             let heat_transfer = self.heat_transfer.calculate(vol, x[0], press, &self); // [J/s]
             let heat_transfer = heat_transfer / self.sec_to_rad; // [J/CA radian]
-            let d_mass = self.flow_ratio.mass_flow / self.sec_to_rad; // [kg/CA radian]
+            let d_mass = mass_flow; // [kg/CA radian]
             let d_temp = cv_inv / x[1]
-                * (heat_transfer - press * d_vol + self.flow_ratio.enthalpy_flow / self.sec_to_rad
-                    - cv * x[0] * d_mass); // [K/CA radian]
+                * (heat_transfer - press * d_vol + enthalpy_flow - cv * x[0] * d_mass); // [K/CA radian]
             array![d_temp, d_mass]
         };
 
+        // println!("mass flow: {}\t enthalpy flow: {}", mass_flow, enthalpy_flow);
         let ini_condition = array![self.gas.T(), self.mass];
         let open_phase_integrated = ode::rk4_step(
             open_phase_equations,
@@ -165,7 +220,82 @@ impl Cylinder {
         let mass = open_phase_integrated[1];
         let (vol, _) = Cylinder::calc_volume(&self.geometry, &self.crankshaft, self.angle + d_angle);
         let press = mass * self.gas.R() * temp / vol;
-        ( temp, press, mass, vol )
+
+        // Estimating final compositions:
+        let dt = d_angle/self.sec_to_rad;
+
+        // summing the fresh charge of all intake valves
+        let mut fresh_charge_mass = 0.0; // kg
+        self.int_valves.basic_info.iter_mut().for_each(|v| {
+            fresh_charge_mass += v.get_charge(dt);
+        });
+        self.total_fresh_charge += fresh_charge_mass;
+
+        // injecting fuel
+        self.fuel_mass = 0.0;
+        let fuel_mass: f64;
+        let additional_mass: Vec<(f64, &str)>;
+        if let Some(inj) = &mut self.injector {
+            if inj.inj_type() == "port" {
+                fuel_mass = inj.calc_port_injected_fuel(fresh_charge_mass);
+            } else if inj.inj_type() == "direct" {
+                fuel_mass = 0.0;
+            } else {panic!("Unknown injector type!")}
+            inj.set_injected_fuel(fuel_mass + inj.injected_fuel());
+            additional_mass = vec![(fresh_charge_mass - fuel_mass, &self.int_valves.gas_comp), (fuel_mass, inj.fuel().composition())];
+        } else {
+            additional_mass = vec![(fresh_charge_mass, &self.int_valves.gas_comp)];
+        }
+        let new_mole_frac = self.gas.if_mixed_with(self.mass, additional_mass); 
+
+        ( temp, press, mass, vol, new_mole_frac )
+    }
+
+    pub fn fuel_mass(&self) -> f64 {
+        if let Some(_) = &self.injector {
+            self.total_injected_fuel
+        } else {
+            0.0
+        }
+    }
+
+    pub fn set_speed(&mut self, speed: f64) {
+        if speed.is_sign_negative() {
+            println!("Error at Cylinder::set_speed()");
+            println!(" speed must be a positive value! {}", speed);
+            std::process::exit(1);
+        }
+        self.speed = speed;
+        self.sec_to_rad = 2.0 * PI * speed / 60.0;
+        self.piston.mean_velocity = 2.0 * self.geometry.stroke * speed / 60.0;
+    }
+
+    pub fn set_displacement(&mut self, disp: f64) {
+        if disp.is_sign_negative() {
+            println!("Error at Cylinder::set_displacement()");
+            println!(" displacement must be a positive value! {}", disp);
+            std::process::exit(1);
+        }
+        self.geometry.displacement = disp;
+        self.geometry.stroke = disp / self.geometry.transverse_area;
+        self.geometry.clearance = disp / (self.geometry.compression_ratio - 1.0);
+        self.geometry.total_volume = disp + self.geometry.clearance;
+        self.piston.mean_velocity = 2.0 * self.geometry.stroke * self.speed;
+    }
+
+    pub fn set_compression_ratio(&mut self, comp_ratio: f64) {
+        if comp_ratio.is_sign_negative() {
+            println!("Error at Cylinder::set_compression_ratio()");
+            println!(" compression ratio must be a positive value! {}", comp_ratio);
+            std::process::exit(1);
+        }
+        self.geometry.compression_ratio = comp_ratio;
+        self.geometry.clearance = self.geometry.displacement / (comp_ratio - 1.0);
+        self.geometry.total_volume = self.geometry.displacement + self.geometry.clearance;
+    }
+
+    pub fn set_store_species(&mut self, state: bool) {
+        self.store_species = state;
     }
 
     /// Test the compression phase of a cylinder.
@@ -182,7 +312,6 @@ impl Cylinder {
         let pvk = self.gas.P()*self.volume.powf(self.gas.k());
         let k = self.gas.k();
         println!("initial PV^K = {}", pvk);
-        self.store_data.add_data(array![self.angle, self.gas.P()/1e5, self.gas.T(), self.volume*1e6, self.mass*1e3]);
         for _ in 0..limit {
             let new_prop = self.closed_phase(d_angle);
             let temp = new_prop.0;
@@ -199,23 +328,26 @@ impl Cylinder {
             self.gas.TP(temp, press);
             self.mass = mass;
             self.volume = vol;
-            self.store_data.add_data(array![self.angle, self.gas.P()/1e5, self.gas.T(), self.volume*1e6, self.mass*1e3]);
         }
         println!("max P = {}", pvk/self.volume.powf(k));
-        self.write_to_file(self.name(), (0, (limit - 1) as usize), None);
     }
 
+    /// Estimates the cylinder volume and its derivative.
     pub fn _test_volume(&mut self) {
-        let range: Array1<f64> = Array1::linspace(0.0, 720.0, 7200);
+        println!("Running '{}' `_test_volume()` ", self.name());
+        let d_angle = 0.1f64;
+        let mut angle = 0.0f64;
         let mut result: Vec<String> = Vec::new();
         result.push(format!("crank-angle [deg]\tvolume [m³]\tdv [m³/CA-rad]\n"));
-        for angle in range.iter() {
+        for _ in 0..7200 {
             let (v, dv) =
                 Cylinder::calc_volume(&self.geometry, &self.crankshaft, angle.to_radians());
-            result.push(format!("{}\t{}\t{}\n", angle, v, dv));
+            result.push(format!("{:.2}\t{}\t{}\n", angle, v, dv));
+            angle +=d_angle
         }
-        let mut file = std::fs::File::create("v_dv").expect("Error opening writing file");
+        let mut file = std::fs::File::create("v_dv_test.txt").expect("Error opening writing file");
         write!(file, "{}", result.join("")).expect("Unable to write data");
+        println!("Test fineshed!");
     }
 }
 
@@ -237,8 +369,8 @@ impl ZeroDim for Cylinder {
     }
     fn advance(&mut self, dt: f64) {
         let d_angle = dt * self.sec_to_rad; // [CA radian]
-        let new_prop: (f64, f64, f64, f64);
-        if self.flow_ratio.mass_flow == 0.0 {
+        let new_prop: (f64, f64, f64, f64, Array1<f64>);
+        if self.int_valves.flow_info.mass_flow == 0.0 && self.exh_valves.flow_info.mass_flow == 0.0 {
             new_prop = self.closed_phase(d_angle);
         } else {
             new_prop = self.open_phase(d_angle);
@@ -247,6 +379,7 @@ impl ZeroDim for Cylinder {
         let press = new_prop.1;
         let mass = new_prop.2;
         let vol = new_prop.3;
+        let mole_frac = new_prop.4;
 
         // update: T, P, V, angle, mass and composition
         self.angle = if self.angle + d_angle >= 4.0 * PI {
@@ -254,23 +387,81 @@ impl ZeroDim for Cylinder {
         } else {
             self.angle + d_angle
         };
-        self.gas.TP(temp, press);
+        self.gas.TPX_array(temp, press, &mole_frac);
         self.mass = mass;
         self.volume = vol;
+    }
 
-        // Storing data
-        self.store_data.add_data(array![self.angle.to_degrees(), self.gas.P()/1e5, self.gas.T(), self.volume*1e6, self.mass*1e3]);
+    fn update_flow_ratio(&mut self, total_flow_ratio: Vec<(&str, &FlowRatio)>) {
+
+        // find intake valves
+        let mut intake_flow_ratio = FlowRatio::new();
+        for valve in self.int_valves.basic_info.iter_mut() {
+            match total_flow_ratio.iter().find(|(name, _)| **name == valve.name) {
+                Some((_,flow_ratio)) => {
+                    valve.mass_flow = flow_ratio.mass_flow;
+                    intake_flow_ratio = &intake_flow_ratio + flow_ratio;
+                },
+                None => {
+                    println!("Error at Cylinder::update_flow_ratio()");
+                    println!(" object {} is not connected to one of the objects:", valve.name);
+                    for (name, _) in total_flow_ratio.iter() {
+                        print!(" '{}'", name);
+                    }
+                    std::process::exit(1)
+                }
+            }
+        }
+
+        // find exhaust valves
+        let mut exhaust_flow_ratio = FlowRatio::new();
+        for valve in self.exh_valves.basic_info.iter_mut() {
+            match total_flow_ratio.iter().find(|(name, _)| **name == valve.name) {
+                Some((_,flow_ratio)) => {
+                    valve.mass_flow = flow_ratio.mass_flow;
+                    exhaust_flow_ratio = &exhaust_flow_ratio + flow_ratio;
+                },
+                None => {
+                    println!("Error at Cylinder::update_flow_ratio()");
+                    println!(" object {} is not connected to one of the objects:", valve.name);
+                    for (name, _) in total_flow_ratio.iter() {
+                        print!(" '{}'", name);
+                    }
+                    std::process::exit(1)
+                }
+            }
+        }
+        self.int_valves.flow_info = intake_flow_ratio;
+        self.exh_valves.flow_info = exhaust_flow_ratio;
     }
-    fn update_flow_ratio(&mut self, total_flow_ratio: FlowRatio) {
-        self.flow_ratio = total_flow_ratio;
+}
+
+impl SaveData for Cylinder {
+    fn get_headers(&self) -> String {
+        if self.store_species {
+            let hearder = "crank-angle [deg]\tpressure [bar]\ttemperature [K]\tvolume [cm³]\tmass [mg]".to_string();
+            let species = self.gas.species().join("\t");
+            format!("{}\t{}", hearder, species)
+        } else {
+            "crank-angle [deg]\tpressure [bar]\ttemperature [K]\tvolume [cm³]\tmass [mg]".to_string()
+        }
+        
     }
-    fn write_to_file(
-        &self,
-        file_name: &str,
-        index_range: (usize, usize),
-        additional_data: Option<(String, ArrayView2<f64>)>,
-    ) {
-        self.store_data.write_to_file(file_name, index_range, additional_data);
+    fn num_storable_variables(&self) -> usize {
+        let num_prop: usize = 5;
+        if self.store_species {
+            num_prop + self.gas.species().len()
+        } else {num_prop}
+    }
+    fn get_storable_data(&self) -> Array1<f64> {
+        if self.store_species {
+            stack![Axis(0), 
+            array![self.angle.to_degrees(), self.gas.P()/1e5, self.gas.T(), self.volume*1e6, self.mass*1e6],
+            self.gas.mole_frac().clone()
+            ]
+        } else {
+            array![self.angle.to_degrees(), self.gas.P()/1e5, self.gas.T(), self.volume*1e6, self.mass*1e6]
+        }
     }
 }
 
@@ -315,7 +506,9 @@ impl std::fmt::Display for Cylinder {
     }
 }
 
-#[derive(Debug)]
+impl ZeroD for Cylinder {}
+
+#[derive(Debug, Clone)]
 struct Geometry {
     compression_ratio: f64, //[-]
     diameter: f64,          //[m]
@@ -347,7 +540,7 @@ impl Geometry {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Crankshaft {
     conrod: f64,            // [m]
     crank: f64,             // [m]
@@ -368,7 +561,7 @@ impl Crankshaft {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Piston {
     mean_velocity: f64, // [m/s]
     temperature: f64,   // [K]
@@ -387,13 +580,13 @@ impl Piston {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Head {
     temperature: f64, // [K]
     area: f64,        // [m^2]
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct HeatTransfer {}
 
 impl HeatTransfer {
@@ -411,11 +604,73 @@ impl HeatTransfer {
     }
 }
 
-#[derive(Debug)]
-struct Combustion {}
+#[derive(Debug, Clone)]
+struct ValvesInfo {
+    basic_info: Vec<ValveBasicInfo>,
+    flow_info: FlowRatio,
+    gas_comp: String,
+    opening: f64,
+    closing: f64,
+}
 
-impl Combustion {
-    fn calculate(&self) -> f64 {
-        0.0
+impl ValvesInfo {
+    fn new(basic_info: Vec<ValveBasicInfo>, gas_comp: String) -> ValvesInfo {
+        let mut opens_at = std::f64::INFINITY;
+        let mut closes_at = std::f64::NEG_INFINITY;
+        for v in basic_info.iter() {
+            if v.opening_angle < opens_at {
+                opens_at = v.opening_angle;
+            }
+            if v.closing_angle > closes_at {
+                closes_at = v.closing_angle;
+            }
+        }
+        ValvesInfo {
+            basic_info,
+            flow_info: FlowRatio::new(),
+            gas_comp,
+            opening: opens_at.to_radians(),
+            closing: closes_at.to_radians(),
+        }
     }
 }
+
+#[derive(Debug, Clone)]
+struct ValveBasicInfo {
+    name: String,
+    opening_angle: f64,
+    closing_angle: f64,
+    mass_flow: f64,
+    back_flow: f64,
+}
+
+impl ValveBasicInfo {
+    fn new(name: String, opening_angle: f64, closing_angle: f64) -> ValveBasicInfo {
+        ValveBasicInfo {
+            name,
+            opening_angle,
+            closing_angle,
+            mass_flow: 0.0,
+            back_flow: 0.0,
+        }
+    }
+    /// Returns the fresh charge through the valve, always positive sign.
+    /// If flow is leaving the cylinder, it is added to the backflow counter. 
+    fn get_charge(&mut self, dt: f64) -> f64 {
+        let intake_mass = self.mass_flow*dt;
+        if intake_mass >= 0.0 {
+            let fresh_charge = intake_mass - self.back_flow;
+            if fresh_charge >= 0.0 {
+                self.back_flow = 0.0;
+                return fresh_charge;
+            } else {
+                self.back_flow = -fresh_charge;
+                return 0.0;
+            }
+        } else {
+            self.back_flow -= intake_mass;
+            0.0
+        }
+    }
+}
+

@@ -1,3 +1,3 @@
 //! Contains all **Connector elements**
-pub mod conn_core;
 pub mod valve;
+pub mod zero_dim_conn;

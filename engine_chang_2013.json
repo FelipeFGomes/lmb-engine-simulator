@@ -1,0 +1,45 @@
+{
+    "speed": 2000.0,
+    "eccentricity": 0.0,
+    "conrod": 160.0,
+    "displacement": 628.3185,
+    "cylinders_diameter": 100.0,
+    "firing_order": "1",
+    "combustion": {
+        "model": "Two-zone model",
+        "fuel": "C8H18",
+        "air_fuel_ratio": 1.0,
+        "comb_ini": 685.0,
+        "wiebe": {
+            "m": 3.0,
+            "a": 5.0,
+            "comb_duration": 60.0
+        }
+    },
+    "cylinders": [
+        {
+            "name": "cyl_1",
+            "compression_ratio": 10.0,
+            "intake_valves": [
+                {
+                    "name": "valve_intake",
+                    "opening_angle": 330.0,
+                    "closing_angle": 550.0,
+                    "diameter": 35.0,
+                    "max_lift": 9.0
+                }
+            ],
+            "exhaust_valves": [
+                {   
+                    "name": "valve_exhaust",
+                    "opening_angle": 170.0,
+                    "closing_angle": 390.0,
+                    "diameter": 28.0,
+                    "max_lift": 9.0
+                }
+            ]
+        }
+    ]
+}
+
+
