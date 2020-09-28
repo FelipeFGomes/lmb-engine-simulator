@@ -81,11 +81,11 @@ impl ZeroDim for Reservoir {
 
 impl SaveData for Reservoir {
     fn get_headers(&self) -> String {
-        "pressure [bar]\ttemperature [K]\tmass [kg]".to_string()
+        "pressure [bar]\ttemperature [K]\tmass [g]".to_string()
     }
     fn num_storable_variables(&self) -> usize {3}
     fn get_storable_data(&self) -> Array1<f64> {
-        array![self.gas.P()/1e5, self.gas.T(), self.mass]
+        array![self.gas.P()/1e5, self.gas.T(), self.mass*1e3]
     }
 }
 

@@ -1,0 +1,54 @@
+{
+    "speed": 6000.0,
+    "eccentricity": 0.0,
+    "conrod": 161.9,
+    "displacement": 496.21,
+    "bore": 90.0,
+    "firing_order": "1",
+    "combustion": {
+        "model": "Two-zone model",        
+        "comb_ini": 706.0,
+        "wiebe": {
+            "a": 6.02,
+            "m": 1.64,
+            "comb_duration": 44.0
+        }
+    },
+    "injector": {
+        "inj_type": "port",
+        "air_fuel_ratio": 0.85,
+        "fuel": {
+            "name": "C8H18",
+            "state": "liquid",
+            "lhv": 43.5e06,
+            "heat_vap": 400.0e3
+        }
+    },
+    "cylinders": [
+        {
+            "name": "cyl_1",
+            "compression_ratio": 11.2,
+            "wall_temperature": 470.0,
+            "intake_valves": [
+                {
+                    "name": "valve_int",
+                    "opening_angle": 305.0,
+                    "closing_angle": 616.0,
+                    "diameter": 48.2,
+                    "max_lift": 12.0
+                }
+            ],
+            "exhaust_valves": [
+                {   
+                    "name": "valve_exh",
+                    "opening_angle": 104.0,
+                    "closing_angle": 404.0,
+                    "diameter": 39.3,
+                    "max_lift": 9.7
+                }
+            ]
+        }
+    ]
+}
+
+

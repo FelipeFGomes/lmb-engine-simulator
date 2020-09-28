@@ -253,8 +253,8 @@ impl Gas {
         self.num_species
     }
 
-    pub fn contains_specie(&self, specie: &String) -> bool {
-        self.species.contains(specie)
+    pub fn contains_specie(&self, specie: &str) -> bool {
+        self.species.contains(&specie.to_string())
     }
 
     pub fn get_specie_index(&self, specie: &str) -> usize {

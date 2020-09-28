@@ -33,6 +33,7 @@ pub mod zero_dim;
 // Re-exporting
 pub use crate::core::system_builder::SystemBuilder;
 pub use crate::reaction::gas::Gas;
+pub use crate::reaction::combustion;
 pub use crate::engine::engine::Engine;
 
 // Object's type

@@ -1,13 +1,13 @@
-use crate::base::constants::_P_REF;
+use crate::base::constants::{_P_REF, _T_REF};
 use crate::connector::valve::Valve;
 use crate::core::traits::ZeroDim;
 use crate::reaction::combustion;
 use crate::reaction::combustion::{Combustion, WiebeFunction};
 use crate::reaction::gas::Gas;
 use crate::zero_dim::cylinder::Cylinder;
+use super::json_reader::{JsonEngine, JsonFuel};
 use crate::FlowRatio;
 use ndarray::*;
-use serde::{Deserialize, Serialize};
 use serde_json;
 use std::f64::consts::PI;
 use std::io::Write;
@@ -72,11 +72,14 @@ impl Engine {
 
         // checking condition
         if json_engine.combustion.is_some() && json_engine.injector.is_none() {
-            let msg = format!("
+            let msg = format!(
+                "
                 Combustion model can only be created if an \"Injector\" has been added.
                 Add the \"Injector\" field on file: \"{}\"
-                ", file_name);
-            return Err(msg)
+                ",
+                file_name
+            );
+            return Err(msg);
         }
 
         // instantiating combustion
@@ -88,7 +91,12 @@ impl Engine {
             // creating Fuel obj
             let fuel = Fuel::new(&inj_json.fuel, gas);
             // creating Injector obj
-            injector = Some(Injector::new(inj_json.inj_type.clone(), inj_json.air_fuel_ratio, &fuel, &air_gas));
+            injector = Some(Injector::new(
+                inj_json.inj_type.clone(),
+                inj_json.air_fuel_ratio,
+                &fuel,
+                &air_gas,
+            ));
             if let Some(comb) = &json_engine.combustion {
                 if !gas.contains_specie(&inj_json.fuel.name) {
                     return Err(format!(
@@ -98,14 +106,16 @@ impl Engine {
                 }
                 // Combustion models
                 if comb.model == "Two-zone model" {
+                    let wiebe =
+                        WiebeFunction::new(comb.wiebe.a, comb.wiebe.m, comb.wiebe.comb_duration);
                     combustion = Box::new(combustion::TwoZoneCombustion::new(
                         comb.comb_ini,
                         inj_json.air_fuel_ratio,
-                        &comb.wiebe,
+                        wiebe,
                         gas,
                         &fuel,
                         &air_gas,
-                    ))
+                    )?);
                 } else {
                     println!("WARNING! Model `{}` not found", comb.model);
                     println!("WARNING! No combustion will be used instead");
@@ -115,7 +125,7 @@ impl Engine {
                 combustion = Box::new(combustion::NoCombustion::new());
             }
         } else {
-                combustion = Box::new(combustion::NoCombustion::new());
+            combustion = Box::new(combustion::NoCombustion::new());
         }
 
         // instantianting cylinders
@@ -203,36 +213,52 @@ impl Engine {
 
     pub fn calc_operational_param(
         &mut self,
-        press: Vec<ArrayView1<f64>>,    // bar
-        vol: Vec<ArrayView1<f64>>,      // cm^3
+        press: Vec<ArrayView1<f64>>, // bar
+        vol: Vec<ArrayView1<f64>>,   // cm^3
     ) {
         let mut power = 0.0f64;
         let mut total_work = 0.0f64;
         for (p, v) in press.iter().zip(vol) {
-            let mut dv: Array1<f64> = Array1::zeros(v.len()-1);
-            let mut p_mean: Array1<f64> = Array1::zeros(p.len()-1);
+            let mut dv: Array1<f64> = Array1::zeros(v.len() - 1);
+            let mut p_mean: Array1<f64> = Array1::zeros(p.len() - 1);
             Zip::from(&mut dv)
                 .and(v.slice(s![1..]))
-                .and(v.slice(s![0..v.len()-1]))
-                .apply(|dv, v2, v1| *dv = (v2-v1)*1e-6);
+                .and(v.slice(s![0..v.len() - 1]))
+                .apply(|dv, v2, v1| *dv = (v2 - v1) * 1e-6);
             Zip::from(&mut p_mean)
                 .and(p.slice(s![1..]))
-                .and(p.slice(s![0..p.len()-1]))
-                .apply(|pm, p2, p1| *pm = 0.5*(p2+p1)*1e5);
-            let work = dv.dot( &(p_mean - _P_REF) );
+                .and(p.slice(s![0..p.len() - 1]))
+                .apply(|pm, p2, p1| *pm = 0.5 * (p2 + p1) * 1e5);
+            let work = dv.dot(&(p_mean - _P_REF));
             total_work += work;
-            power += work*self.speed/120.0; // W
+            power += work * self.speed / 120.0; // W
         }
 
         let mut total_fuel_mass = 0.0f64;
-        self.cylinders().iter().for_each(|c| total_fuel_mass += c.fuel_mass());
+        self.cylinders()
+            .iter()
+            .for_each(|c| total_fuel_mass += c.fuel_mass());
+        // println!("fuel mass: {:.4} [mg]", total_fuel_mass*1e6);
 
+        let mut mass: f64 = 0.0;
+        self.cylinders()
+            .iter()
+            .for_each(|c| mass += c.closed_phase_mass());
+        let total_disp = self.displacement * (self.cylinders().len() as f64) * 1e-6;
+        let r_ref = 287.0;
+        let vol_effic = 100.0 * mass / (_P_REF * total_disp / (r_ref * _T_REF));
 
-        let torque = power/(self.speed*PI/30.0);
-        let imep = total_work/self.displacement*10.0; // displ is in cm³
+        let mut residual_mass: f64 = 0.0;
+        self.cylinders()
+            .iter()
+            .for_each(|c| residual_mass += c.residual_mass_frac());
+        residual_mass = 100.0 * residual_mass / (self.cylinders().len() as f64);
+
+        let torque = power / (self.speed * PI / 30.0);
+        let imep = total_work / self.displacement * 10.0; // displ is in cm³
         let thermal_effic: f64;
         if let Some(injector) = &self.injector {
-            thermal_effic = 100.0*total_work/(total_fuel_mass*injector.fuel().lhv());
+            thermal_effic = 100.0 * total_work / (total_fuel_mass * injector.fuel().lhv());
         } else {
             thermal_effic = 0.0
         }
@@ -242,16 +268,26 @@ impl Engine {
         self.operat_param.torque.push(torque);
         self.operat_param.imep.push(imep);
         self.operat_param.thermal_effic.push(thermal_effic);
+        self.operat_param.vol_effic.push(vol_effic);
+        self.operat_param.residual_mass.push(residual_mass);
     }
 
     pub fn write_performance_to(&self, file_name: &str) {
         let op = &self.operat_param;
         let mut data: Vec<String> = Vec::new();
         for i in 0..self.operat_param.speed.len() {
-            data.push( format!("{:.1}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\n", op.speed[i], op.power[i], op.torque[i], op.imep[i], op.thermal_effic[i]) );
+            data.push(format!(
+                "{:.1}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\n",
+                op.speed[i],
+                op.power[i],
+                op.torque[i],
+                op.imep[i],
+                op.thermal_effic[i],
+                op.vol_effic[i],
+                op.residual_mass[i],
+            ));
         }
-        
-        let header = "Speed [RPM]\tPower [W]\tTorque [Nm]\tIMEP [bar]\tEfficiency [%]".to_string();
+        let header = "Speed [RPM]\tPower [W]\tTorque [Nm]\tIMEP [bar]\tEfficiency [%]\tVolumetric effic [%]\tResidual mass [%]".to_string();
         let mut file = std::fs::File::create(file_name).expect("Error opening writing file");
         write!(file, "{}\n", header).expect("Unable to write data");
         write!(file, "{}", data.join("")).expect("Unable to write data");
@@ -284,6 +320,33 @@ impl Engine {
         } else {
             println!("Error at Engine::set_compression_ratio_of()");
             println!(" \"{}\" was not found", cyl);
+            std::process::exit(1);
+        }
+    }
+
+    /// Set combustion model for all cylinders
+    pub fn set_combustion_model(&mut self, comb: &Box<dyn Combustion>) {
+        if let Some(_) = &self.injector {
+            self.combustion = comb.clone();
+            self.cylinders
+                .iter_mut()
+                .for_each(|c| c.set_combustion_model(comb.clone()));
+        } else {
+            println!(
+                "Error at Engine::set_combustion_model(): Engine does not contain an Injector"
+            );
+            println!(" A combustion model cannot be added to an engine without an Injector");
+            std::process::exit(1);
+        }
+        self.combustion = comb.clone();
+    }
+
+    /// Set injectors relative air-fuel ratio, input between 0 and 1
+    pub fn set_air_fuel_ratio(&mut self, afr: f64) {
+        if let Some(inj) = &mut self.injector {
+            inj.set_air_fuel_ratio(afr);
+        } else {
+            println!("Error at Engine:: set_air_fuel_ratio(): Injector does not exist");
             std::process::exit(1);
         }
     }
@@ -325,6 +388,14 @@ impl Engine {
         self.combustion.model_name().to_string()
     }
 
+    pub fn injector(&self) -> Option<&Injector> {
+        if let Some(inj) = &self.injector {
+            Some(inj)
+        } else {
+            None
+        }
+    }
+
     /// Returns the constant multiplier to change from seconds to crank-angle degrees
     pub fn sec_to_rad(&self) -> f64 {
         self.sec_to_rad
@@ -341,64 +412,14 @@ impl Engine {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct JsonEngine {
-    pub speed: f64,
-    pub eccentricity: f64,
-    pub conrod: f64,       // [mm]
-    pub displacement: f64, // [cm³]
-    pub bore: f64,         // [mm]
-    pub firing_order: String,
-    pub combustion: Option<JsonCombustion>,
-    pub injector: Option<JsonInjector>,
-    pub cylinders: Vec<JsonCylinder>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct JsonCylinder {
-    pub name: String,
-    pub compression_ratio: f64, // [-]
-    pub wall_temperature: f64,
-    pub intake_valves: Vec<JsonValve>,
-    pub exhaust_valves: Vec<JsonValve>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct JsonValve {
-    pub name: String,
-    pub opening_angle: f64,
-    pub closing_angle: f64,
-    pub diameter: f64, // [mm]
-    pub max_lift: f64, // [mm]
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct JsonCombustion {
-    pub model: String,
-    pub comb_ini: f64,
-    pub wiebe: WiebeFunction,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct JsonInjector {
-    pub inj_type: String,
-    pub air_fuel_ratio: f64,
-    pub fuel: JsonFuel,
-}
-#[derive(Serialize, Deserialize, Debug)]
-pub struct JsonFuel {
-    name: String,
-    state: String,
-    lhv: Option<f64>,
-    heat_vap: Option<f64>,
-}
-
 pub struct OperationalParameters {
     speed: Vec<f64>,
     power: Vec<f64>,
     torque: Vec<f64>,
     imep: Vec<f64>,
     thermal_effic: Vec<f64>,
+    vol_effic: Vec<f64>,
+    residual_mass: Vec<f64>,
 }
 
 impl OperationalParameters {
@@ -409,6 +430,8 @@ impl OperationalParameters {
             torque: Vec::new(),
             imep: Vec::new(),
             thermal_effic: Vec::new(),
+            vol_effic: Vec::new(),
+            residual_mass: Vec::new(),
         }
     }
 }
@@ -416,18 +439,23 @@ impl OperationalParameters {
 impl std::fmt::Display for OperationalParameters {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
-            f,"
+            f,
+            "
             Speed [RPM]: {:.1?}
             Power [W]:\t {:.2?}
             Torque [Nm]: {:.2?}
             IMEP [bar]:  {:.2?}
             effic [%]:\t {:.2?}
+            vol_effic [%]: {:.2?}
+            residual_mass [%]: {:.2?}
             ",
             self.speed,
             self.power,
             self.torque,
             self.imep,
             self.thermal_effic,
+            self.vol_effic,
+            self.residual_mass,
         )
     }
 }
@@ -442,15 +470,13 @@ pub struct Fuel {
     carbon: f64,
     hydrogen: f64,
     oxigen: f64,
-    nitrogen: f64, 
+    nitrogen: f64,
 }
 
 impl Fuel {
     fn new(fuel: &JsonFuel, gas: &Gas) -> Fuel {
-
         let mole_weight = gas.mole_weight_of(&fuel.name);
         let atoms = gas.atoms_of(&fuel.name);
-        
         let lhv = match fuel.lhv {
             Some(lhv) => lhv,
             None => Fuel::calc_low_heat_value(&fuel.name),
@@ -463,24 +489,24 @@ impl Fuel {
 
         let c = match atoms.get("C") {
             Some(x) => *x,
-            None => 0.0
+            None => 0.0,
         };
         let h = match atoms.get("H") {
             Some(x) => *x,
-            None => 0.0
+            None => 0.0,
         };
         let o = match atoms.get("O") {
             Some(x) => *x,
-            None => 0.0
+            None => 0.0,
         };
 
         let n = match atoms.get("N") {
             Some(x) => *x,
-            None => 0.0
+            None => 0.0,
         };
 
-        let air_moles = c + 0.25*h - 0.5*o;
-        let comp = format!("{}:1.0",fuel.name);
+        let air_moles = c + 0.25 * h - 0.5 * o;
+        let comp = format!("{}:1.0", fuel.name);
 
         Fuel {
             name: fuel.name.to_string(),
@@ -509,17 +535,36 @@ impl Fuel {
         }
     }
 
-    pub fn name<'a>(&'a self) -> &'a str {&self.name}
-    pub fn mole_weight(&self) -> f64 {self.mole_weight}
-    pub fn air_moles(&self) -> f64 {self.air_moles}
-    pub fn lhv(&self) -> f64 {self.lhv}
-    pub fn heat_vap(&self) -> f64 {self.heat_vap}
-    pub fn composition<'a>(&'a self) -> &'a str {&self.comp}
-    pub fn carbon(&self) -> f64 {self.carbon}
-    pub fn hydrogen(&self) -> f64 {self.hydrogen}
-    pub fn oxigen(&self) -> f64 {self.oxigen}
-    pub fn nitrogen(&self) -> f64 {self.nitrogen}
-
+    pub fn name<'a>(&'a self) -> &'a str {
+        &self.name
+    }
+    pub fn mole_weight(&self) -> f64 {
+        self.mole_weight
+    }
+    pub fn air_moles(&self) -> f64 {
+        self.air_moles
+    }
+    pub fn lhv(&self) -> f64 {
+        self.lhv
+    }
+    pub fn heat_vap(&self) -> f64 {
+        self.heat_vap
+    }
+    pub fn composition<'a>(&'a self) -> &'a str {
+        &self.comp
+    }
+    pub fn carbon(&self) -> f64 {
+        self.carbon
+    }
+    pub fn hydrogen(&self) -> f64 {
+        self.hydrogen
+    }
+    pub fn oxigen(&self) -> f64 {
+        self.oxigen
+    }
+    pub fn nitrogen(&self) -> f64 {
+        self.nitrogen
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -535,13 +580,14 @@ pub struct Injector {
 
 impl Injector {
     pub fn new(inj_type: String, afr: f64, fuel: &Fuel, air_comp: &Gas) -> Injector {
-        let air_molar_mass = (air_comp.mole_frac()/air_comp.mole_frac_of("O2")*air_comp.mole_weight()).sum();
-        let total_mass = fuel.mole_weight() + afr*fuel.air_moles()*air_molar_mass;
-        let fuel_mass_frac = fuel.mole_weight()/total_mass;
-        let afr_stoich = fuel.air_moles()*air_molar_mass/fuel.mole_weight();
-        let afr_afr_stoich = afr*afr_stoich;
-        
-        Injector{
+        let air_molar_mass =
+            (air_comp.mole_frac() / air_comp.mole_frac_of("O2") * air_comp.mole_weight()).sum();
+        let total_mass = fuel.mole_weight() + afr * fuel.air_moles() * air_molar_mass;
+        let fuel_mass_frac = fuel.mole_weight() / total_mass;
+        let afr_stoich = fuel.air_moles() * air_molar_mass / fuel.mole_weight();
+        let afr_afr_stoich = afr * afr_stoich;
+
+        Injector {
             inj_type,
             air_fuel_ratio: afr,
             fuel: fuel.clone(),
@@ -552,16 +598,37 @@ impl Injector {
         }
     }
     pub fn calc_port_injected_fuel(&self, intake_mass: f64) -> f64 {
-        self.fuel_mass_frac*intake_mass
+        self.fuel_mass_frac * intake_mass
     }
     pub fn calc_direct_injected_fuel(&self, intake_mass: f64) -> f64 {
-        intake_mass/self.afr_afr_stoich
+        intake_mass / self.afr_afr_stoich
     }
     pub fn set_injected_fuel(&mut self, fuel_mass: f64) {
         self.injected_fuel = fuel_mass;
     }
-    pub fn inj_type<'a>(&'a self) -> &'a str {&self.inj_type}
-    pub fn air_fuel_ratio(&self) -> f64 {self.air_fuel_ratio}
-    pub fn fuel<'a>(&'a self) -> &'a Fuel {&self.fuel}
-    pub fn injected_fuel(&self) -> f64 {self.injected_fuel}
+    pub fn inj_type<'a>(&'a self) -> &'a str {
+        &self.inj_type
+    }
+    pub fn air_fuel_ratio(&self) -> f64 {
+        self.air_fuel_ratio
+    }
+    pub fn fuel<'a>(&'a self) -> &'a Fuel {
+        &self.fuel
+    }
+    pub fn injected_fuel(&self) -> f64 {
+        self.injected_fuel
+    }
+    pub fn set_air_fuel_ratio(&mut self, afr: f64) {
+        self.air_fuel_ratio = afr;
+        // updating other properties
+        let air_molar_mass = (self.air_comp.mole_frac() / self.air_comp.mole_frac_of("O2")
+            * self.air_comp.mole_weight())
+        .sum();
+        let total_mass = self.fuel.mole_weight() + afr * self.fuel.air_moles() * air_molar_mass;
+        let fuel_mass_frac = self.fuel.mole_weight() / total_mass;
+        let afr_stoich = self.fuel.air_moles() * air_molar_mass / self.fuel.mole_weight();
+        let afr_afr_stoich = afr * afr_stoich;
+        self.fuel_mass_frac = fuel_mass_frac;
+        self.afr_afr_stoich = afr_afr_stoich;
+    }
 }

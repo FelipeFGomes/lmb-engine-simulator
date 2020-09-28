@@ -1,7 +1,8 @@
 use crate::numerics::ode_solvers as ode;
 use crate::reaction::gas::Gas;
 use crate::reaction::combustion::{Combustion};
-use crate::engine::engine::{JsonEngine, JsonCylinder, JsonValve, Injector};
+use crate::engine::json_reader::{JsonEngine, JsonCylinder, JsonValve};
+use crate::engine::engine::Injector;
 use crate::core::traits::{ZeroDim, SaveData, ZeroD};
 use crate::{BasicProperties, FlowRatio};
 use ansi_term::Style;
@@ -30,6 +31,9 @@ pub struct Cylinder {
     store_species: bool,
     total_injected_fuel: f64,
     total_fresh_charge: f64,
+    closed_phase_mass: f64,
+    residual_mass_frac: f64,
+
     // blow_by: bool,
     // crevice: bool,
 }
@@ -91,6 +95,11 @@ impl Cylinder {
         let int_valves = ValvesInfo::new(intake_valves_info, intake_gas_comp.clone());
         let exh_valves = ValvesInfo::new(exhaust_valves_info, exhaust_gas_comp.clone());
 
+        let store_species = match cylinder_info.store_species {
+            Some(s) => s,
+            None => false,
+        };
+
         Ok(Cylinder {
             name,
             gas: gas.clone(),
@@ -109,9 +118,11 @@ impl Cylinder {
             injector,
             int_valves,
             exh_valves,
-            store_species: false,
+            store_species,
             total_injected_fuel: 0.0,
             total_fresh_charge: 0.0,
+            closed_phase_mass: 0.0,
+            residual_mass_frac: 0.0,
         })
     }
     /// Returns the instant volume and volume's derivative with crank angle radian, respectively.
@@ -141,6 +152,8 @@ impl Cylinder {
                 if self.fuel_mass == 0.0 {
                     self.fuel_mass = inj.injected_fuel();
                     self.total_injected_fuel = self.fuel_mass;
+                    self.closed_phase_mass = self.mass;
+                    self.residual_mass_frac = 1.0 - (self.total_fresh_charge/self.mass);
                     self.total_fresh_charge = 0.0;
                 } else {
                     inj.set_injected_fuel(0.0);
@@ -149,13 +162,17 @@ impl Cylinder {
                 if self.fuel_mass == 0.0 {
                     self.fuel_mass = inj.calc_direct_injected_fuel(0.0);
                     self.total_injected_fuel = self.fuel_mass;
+                    self.closed_phase_mass = self.mass;
+                    self.residual_mass_frac = 1.0 - self.total_fresh_charge/self.mass;
                     self.total_fresh_charge = 0.0;
                 } else {
                     inj.set_injected_fuel(0.0);
                 }
             }
+        } else {
+            self.closed_phase_mass = self.mass;
+            self.total_fresh_charge = 0.0;
         }
-
         let heat_combustion = self.combustion.get_heat_release_rate(&self.gas, self.fuel_mass, self.angle);
         let const_1 = 1.0 / (self.mass * self.gas.cv());
         let closed_phase_equations = |angle: &f64, x: &Array1<f64>, _: &Vec<f64>| -> Array1<f64> {
@@ -259,6 +276,10 @@ impl Cylinder {
         }
     }
 
+    pub fn closed_phase_mass(&self) -> f64 {self.closed_phase_mass}
+
+    pub fn residual_mass_frac(&self) -> f64 {self.residual_mass_frac}
+
     pub fn set_speed(&mut self, speed: f64) {
         if speed.is_sign_negative() {
             println!("Error at Cylinder::set_speed()");
@@ -296,6 +317,10 @@ impl Cylinder {
 
     pub fn set_store_species(&mut self, state: bool) {
         self.store_species = state;
+    }
+
+    pub fn set_combustion_model(&mut self, comb: Box<dyn Combustion>) {
+        self.combustion = comb;
     }
 
     /// Test the compression phase of a cylinder.
