@@ -174,9 +174,9 @@ impl SystemBuilder {
         self
     }
 
-    /// Add a `connector::ZeroDimConn` connector. It connects two `ZeroDim` through a hole of diameter `diam` in mm.
+    /// Add a `connector::Orifice` connector. It connects two `ZeroDim` through a hole of diameter `diam` in mm.
     /// The discharge coefficient must be between 0 and 1.
-    pub fn add_connection_between_0D<'a>(&'a mut self, elem_name:&str, diam: f64, discharge_coeff: f64, conn: Vec<&str>) -> &'a mut Self {
+    pub fn add_orifice<'a>(&'a mut self, elem_name:&str, diam: f64, discharge_coeff: f64, conn: Vec<&str>) -> &'a mut Self {
         // checking if 'elem_name' already exists
         if self.does_it_exist(elem_name) {
             println!("Error at 'add_connection_between_0D':");
@@ -187,7 +187,7 @@ impl SystemBuilder {
         // pushing connector
         let mut connecting: Vec<String> = Vec::new();
         for c in conn {connecting.push(c.to_string());}
-        let zd_conn = match connector::zero_dim_conn::ZeroDimConn::new(elem_name, diam*1e-3, discharge_coeff, connecting) {
+        let zd_conn = match connector::orifice::Orifice::new(elem_name, diam*1e-3, discharge_coeff, connecting) {
             Ok(v) => v,
             Err(err) => {
                 println!("Error at 'add_connection_between_0D':\n {}", err);

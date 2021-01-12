@@ -1,10 +1,10 @@
 #![allow(non_snake_case)]
 
-use crate::core::traits::{Connector, SaveData, Conn};
+use crate::core::traits::{Conn, Connector, SaveData};
 use crate::{BasicProperties, FlowRatio};
 use ndarray::*;
 
-pub struct ZeroDimConn {
+pub struct Orifice {
     name: String,
     area: f64,
     discharge_coeff: f64,
@@ -12,18 +12,29 @@ pub struct ZeroDimConn {
     flow_ratio: Vec<FlowRatio>,
 }
 
-impl ZeroDimConn {
-    pub fn new(name: &str, diam: f64, discharge_coeff: f64, connecting: Vec<String>) -> Result<ZeroDimConn, String> {
+impl Orifice {
+    pub fn new(
+        name: &str,
+        diam: f64,
+        discharge_coeff: f64,
+        connecting: Vec<String>,
+    ) -> Result<Orifice, String> {
         if connecting.len() != 2 {
-            return Err(format!("Connector `ZeroDimConn` must connect only two elements, connecting: {}", connecting.len()));
+            return Err(format!(
+                "Connector `Orifice` must connect only two elements, connecting: {}",
+                connecting.len()
+            ));
         }
         if discharge_coeff > 1.0 || discharge_coeff <= 0.0 {
-            return Err(format!("`discharge_coeff` must be between 0.0 and 1.0: {}", discharge_coeff));
+            return Err(format!(
+                "`discharge_coeff` must be between 0.0 and 1.0: {}",
+                discharge_coeff
+            ));
         }
         let flow_ratio = vec![FlowRatio::new(), FlowRatio::new()];
-        Ok(ZeroDimConn {
+        Ok(Orifice {
             name: name.to_string(),
-            area: 0.25*std::f64::consts::PI*diam*diam,
+            area: 0.25 * std::f64::consts::PI * diam * diam,
             discharge_coeff,
             connecting,
             flow_ratio,
@@ -31,16 +42,20 @@ impl ZeroDimConn {
     }
 }
 
-impl Connector for ZeroDimConn {
-    fn name<'a>(&'a self) -> &'a str {&self.name}
-    fn connecting<'a>(&'a self) -> &'a Vec<String> {&self.connecting}
-    fn connect_to(&mut self, elem_name: &str) -> Result<(),String> {
+impl Connector for Orifice {
+    fn name<'a>(&'a self) -> &'a str {
+        &self.name
+    }
+    fn connecting<'a>(&'a self) -> &'a Vec<String> {
+        &self.connecting
+    }
+    fn connect_to(&mut self, elem_name: &str) -> Result<(), String> {
         self.connecting.push(elem_name.to_string());
-        self.flow_ratio.push( FlowRatio::new() );
+        self.flow_ratio.push(FlowRatio::new());
         if self.connecting.len() != 2 {
-            return Err(
-                format!("Wrong the number of connections. ZeroDimConn should connect only two elements"),
-            );
+            return Err(format!(
+                "Wrong the number of connections. Orifice should connect only two elements"
+            ));
         }
         Ok(())
     }
@@ -56,7 +71,9 @@ impl Connector for ZeroDimConn {
             i_up = 1;
             i_down = 0;
         } else {
-            self.flow_ratio.iter_mut().for_each(|f| *f = FlowRatio::new());
+            self.flow_ratio
+                .iter_mut()
+                .for_each(|f| *f = FlowRatio::new());
             return;
         }
 
@@ -76,14 +93,19 @@ impl Connector for ZeroDimConn {
                 * (2.0 * k / km * (P_du.powf(2.0 / k) - P_du.powf(kp / k))).sqrt();
         } else {
             // chocked flow: independent of downstream pressure
-            m_dot = self.discharge_coeff * self.area * P_up / (R * T_up).sqrt() * (k * (2.0 / kp).powf(kp / km)).sqrt();
+            m_dot = self.discharge_coeff * self.area * P_up / (R * T_up).sqrt()
+                * (k * (2.0 / kp).powf(kp / km)).sqrt();
         }
 
         // updating `flow_ratio` for upstream objects
-        let i = match self.connecting.iter().position(|name| *name == prop[i_up].name) {
+        let i = match self
+            .connecting
+            .iter()
+            .position(|name| *name == prop[i_up].name)
+        {
             Some(i) => i,
             None => {
-                println!("Error at ZeroDimConn::update_flow_ratio:");
+                println!("Error at Orifice::update_flow_ratio:");
                 println!(" Objects:");
                 for obj in prop.iter() {
                     print!(" '{}'", obj.name);
@@ -94,13 +116,17 @@ impl Connector for ZeroDimConn {
         };
         let ii = i; // store the position to use in the downstream
         self.flow_ratio[i].mass_flow = -m_dot;
-        self.flow_ratio[i].enthalpy_flow = -m_dot*k*R/km*prop[i_up].temperature;
+        self.flow_ratio[i].enthalpy_flow = -m_dot * k * R / km * prop[i_up].temperature;
 
         // updating `flow_ratio` for downstream objects
-        let i = match self.connecting.iter().position(|name| *name == prop[i_down].name) {
+        let i = match self
+            .connecting
+            .iter()
+            .position(|name| *name == prop[i_down].name)
+        {
             Some(i) => i,
             None => {
-                println!("Error at ZeroDimConn::update_flow_ratio():");
+                println!("Error at Orifice::update_flow_ratio():");
                 println!(" Objects:");
                 for obj in prop.iter() {
                     print!(" '{}'", obj.name);
@@ -115,17 +141,28 @@ impl Connector for ZeroDimConn {
     fn get_flow_ratio<'a>(&'a self, elem_name: &str) -> Result<&'a FlowRatio, String> {
         match self.connecting.iter().position(|name| name == elem_name) {
             Some(i) => Ok(&self.flow_ratio[i]),
-            None => Err(format!("object '{}' was not found in '{}'", elem_name, self.name())),
+            None => Err(format!(
+                "object '{}' was not found in '{}'",
+                elem_name,
+                self.name()
+            )),
         }
     }
 }
 
-impl SaveData for ZeroDimConn {
-    fn get_headers(&self) -> String {"mass flow [kg/s]\tenthalpy flow [J/s]".to_string()}
-    fn num_storable_variables(&self) -> usize {2}
+impl SaveData for Orifice {
+    fn get_headers(&self) -> String {
+        "mass flow [kg/s]\tenthalpy flow [J/s]".to_string()
+    }
+    fn num_storable_variables(&self) -> usize {
+        2
+    }
     fn get_storable_data(&self) -> Array1<f64> {
-        array![self.flow_ratio[0].mass_flow, self.flow_ratio[0].enthalpy_flow]
+        array![
+            self.flow_ratio[0].mass_flow,
+            self.flow_ratio[0].enthalpy_flow
+        ]
     }
 }
 
-impl Conn for ZeroDimConn {}
+impl Conn for Orifice {}

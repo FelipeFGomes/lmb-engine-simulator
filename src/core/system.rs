@@ -1,3 +1,4 @@
+use crate::base::constants::MAX_ARRAY_LEN;
 use crate::engine::engine::Engine;
 use crate::{BasicProperties, FlowRatio};
 use crate::{ObjectInfo, ObjectType};
@@ -54,7 +55,7 @@ impl System {
             connector_objects_index: Vec::new(),
             cycle_start: 0,
             iterations_counter: 0,
-            time: Array::from_elem((500000, 1), 0.),
+            time: Array::from_elem((MAX_ARRAY_LEN, 1), 0.),
         };
 
         system = system.setup_indexes()?;
@@ -182,7 +183,6 @@ impl System {
             .for_each(|obj| obj.stored_data.reset_data());
         self.cycle_start = 0;
         self.iterations_counter = 0;
-        self.time = Array::from_elem((500000, 1), 0.);
 
         let mut time = 0.0;
         let mut cycle = 0;
@@ -198,7 +198,7 @@ impl System {
             // estimate by engine
             match &self.engine {
                 Some(engine) => {
-                    let d_angle = 0.10;
+                    let d_angle = 0.05;
                     step = (d_angle * PI / 180.0) / engine.sec_to_rad();
                     step_calculator = Box::new(|_: &System| -> f64 { step })
                 }
@@ -260,14 +260,11 @@ impl System {
                 }
             }
             data.iter_mut().for_each(|d| {
-                pressure.push( d.column(0) );
+                pressure.push(d.column(0));
                 volume.push(d.column(1))
             });
 
-            engine.calc_operational_param(
-                pressure,
-                volume,
-            );
+            engine.calc_operational_param(pressure, volume);
 
             println!("Engine performance:{}", engine.operat_param());
         }

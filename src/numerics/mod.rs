@@ -1,2 +1,2 @@
-//! Contains multiple numeric techniques
+//! Contains multiple numerical techniques
 pub mod ode_solvers;

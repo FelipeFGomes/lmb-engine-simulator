@@ -28,6 +28,8 @@ pub struct Cylinder {
     combustion: Box<dyn Combustion>,
     int_valves: ValvesInfo,
     exh_valves: ValvesInfo,
+    open_phase_start: bool,
+    closed_phase_start: bool,
     store_species: bool,
     total_injected_fuel: f64,
     total_fresh_charge: f64,
@@ -118,6 +120,8 @@ impl Cylinder {
             injector,
             int_valves,
             exh_valves,
+            open_phase_start: false,
+            closed_phase_start: false,
             store_species,
             total_injected_fuel: 0.0,
             total_fresh_charge: 0.0,
@@ -152,8 +156,9 @@ impl Cylinder {
                 if self.fuel_mass == 0.0 {
                     self.fuel_mass = inj.injected_fuel();
                     self.total_injected_fuel = self.fuel_mass;
-                    self.closed_phase_mass = self.mass;
-                    self.residual_mass_frac = 1.0 - (self.total_fresh_charge/self.mass);
+                    self.closed_phase_mass = self.mass; 
+                    let backflow = self.int_valves.get_backflow();
+                    self.residual_mass_frac = 1.0 - (self.total_fresh_charge - backflow)/self.mass;
                     self.total_fresh_charge = 0.0;
                 } else {
                     inj.set_injected_fuel(0.0);
@@ -163,7 +168,8 @@ impl Cylinder {
                     self.fuel_mass = inj.calc_direct_injected_fuel(0.0);
                     self.total_injected_fuel = self.fuel_mass;
                     self.closed_phase_mass = self.mass;
-                    self.residual_mass_frac = 1.0 - self.total_fresh_charge/self.mass;
+                    let backflow = self.int_valves.get_backflow();
+                    self.residual_mass_frac = 1.0 - (self.total_fresh_charge - backflow)/self.mass;
                     self.total_fresh_charge = 0.0;
                 } else {
                     inj.set_injected_fuel(0.0);
@@ -173,6 +179,7 @@ impl Cylinder {
             self.closed_phase_mass = self.mass;
             self.total_fresh_charge = 0.0;
         }
+        
         let heat_combustion = self.combustion.get_heat_release_rate(&self.gas, self.fuel_mass, self.angle);
         let const_1 = 1.0 / (self.mass * self.gas.cv());
         let closed_phase_equations = |angle: &f64, x: &Array1<f64>, _: &Vec<f64>| -> Array1<f64> {
@@ -208,6 +215,14 @@ impl Cylinder {
     /// `d_angle` in crank angle radians
     fn open_phase(&mut self, d_angle: f64) -> (f64, f64, f64, f64, Array1<f64>) {
         // Open Phase -----------------------------------------------------------
+
+        if !self.open_phase_start {
+            // reseting back-flow
+            self.int_valves.basic_info.iter_mut().for_each(|v| v.reset_back_flow());
+            self.exh_valves.basic_info.iter_mut().for_each(|v| v.reset_back_flow());
+            self.open_phase_start = true;
+        }
+
         let cv = self.gas.cv();
         let cv_inv = 1.0 / cv;
         let mass_flow = (self.int_valves.flow_info.mass_flow + self.exh_valves.flow_info.mass_flow) / self.sec_to_rad; // [kg/CA radian]
@@ -268,6 +283,12 @@ impl Cylinder {
         ( temp, press, mass, vol, new_mole_frac )
     }
 
+    fn is_open_phase(&self) -> bool {
+        if self.angle >= self.exh_valves.opening && self.angle <= self.int_valves.closing {
+            true
+        } else {false}
+    }
+
     pub fn fuel_mass(&self) -> f64 {
         if let Some(_) = &self.injector {
             self.total_injected_fuel
@@ -275,6 +296,7 @@ impl Cylinder {
             0.0
         }
     }
+
 
     pub fn closed_phase_mass(&self) -> f64 {self.closed_phase_mass}
 
@@ -395,10 +417,12 @@ impl ZeroDim for Cylinder {
     fn advance(&mut self, dt: f64) {
         let d_angle = dt * self.sec_to_rad; // [CA radian]
         let new_prop: (f64, f64, f64, f64, Array1<f64>);
-        if self.int_valves.flow_info.mass_flow == 0.0 && self.exh_valves.flow_info.mass_flow == 0.0 {
+        if !self.is_open_phase() {
             new_prop = self.closed_phase(d_angle);
+            self.open_phase_start = false;
         } else {
             new_prop = self.open_phase(d_angle);
+            self.closed_phase_start = false;
         }
         let temp = new_prop.0;
         let press = new_prop.1;
@@ -633,6 +657,7 @@ impl HeatTransfer {
 struct ValvesInfo {
     basic_info: Vec<ValveBasicInfo>,
     flow_info: FlowRatio,
+    backflow: f64,
     gas_comp: String,
     opening: f64,
     closing: f64,
@@ -653,10 +678,17 @@ impl ValvesInfo {
         ValvesInfo {
             basic_info,
             flow_info: FlowRatio::new(),
+            backflow: 0.0,
             gas_comp,
             opening: opens_at.to_radians(),
             closing: closes_at.to_radians(),
         }
+    }
+    fn get_backflow(&mut self) -> f64 {
+        let mut total_back_flow = 0.0;
+        self.basic_info.iter().for_each(|v| total_back_flow += v.back_flow);
+        self.backflow = total_back_flow;
+        total_back_flow
     }
 }
 
@@ -696,6 +728,10 @@ impl ValveBasicInfo {
             self.back_flow -= intake_mass;
             0.0
         }
+    }
+
+    fn reset_back_flow(&mut self) {
+        self.back_flow = 0.0;
     }
 }
 

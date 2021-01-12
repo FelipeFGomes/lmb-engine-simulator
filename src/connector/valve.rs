@@ -22,6 +22,7 @@ pub struct Valve {
     valve_lift: ValveLift,
     throat_area: f64,
     flow_ratio: Vec<(String, FlowRatio)>,
+    backflow_mass: f64, 
     connecting: Vec<String>,
 }
 
@@ -47,6 +48,7 @@ impl Valve {
         flow_ratio.push((cylinder.name().to_string(), FlowRatio::new()));
         let valve_lift = ValveLift::new(max_lift_diam_ratio, time_opened);
         let discharge_coeff = Rc::new(Valve::default_discharge_coeff);
+        
         Ok(Valve {
             name,
             angle: 0.0,
@@ -60,6 +62,7 @@ impl Valve {
             valve_lift,
             throat_area: 0.0,
             flow_ratio,
+            backflow_mass: 0.0,
             connecting,
         })
     }
@@ -168,7 +171,7 @@ impl Connector for Valve {
         }
         Ok(())
     }
-    fn update_flow_ratio(&mut self, prop: Vec<BasicProperties>, _: f64) {
+    fn update_flow_ratio(&mut self, prop: Vec<BasicProperties>, dt: f64) {
         if prop.len() != 2 {
             println!("Error at Valve::update_flow_ratio:");
             println!(
@@ -209,16 +212,18 @@ impl Connector for Valve {
             self.set_flow_to_zero();
             thoat_area = 0.0;
             self.throat_area = thoat_area;
+            self.backflow_mass = 0.0;
             return;
         }
+
         // checking flow diretion
         let i_up: usize;
         let i_down: usize;
         let press_ratio = prop[0].pressure / prop[1].pressure;
-        if press_ratio > 1.00000001 {
+        if press_ratio > 1.000000001 {
             i_up = 0;
             i_down = 1;
-        } else if press_ratio < 0.99999991 {
+        } else if press_ratio < 0.999999991 {
             i_up = 1;
             i_down = 0;
         } else {
@@ -226,11 +231,30 @@ impl Connector for Valve {
             return;
         }
 
+        // check if had backflow
+        let T_up: f64;
+        let k: f64;
+        let R: f64;
+        if self.backflow_mass > 0.0 && prop[i_down].name == self.flow_ratio[0].0 {
+            // T_up = self.backflow_gas.T();
+            // k = self.backflow_gas.k();
+            // R = self.backflow_gas.R();
+            let up_frac = 0.5;
+            let down_frac = 1.0 - up_frac;
+            T_up = up_frac*prop[i_up].temperature + down_frac*prop[i_down].temperature;
+            k = up_frac*prop[i_up].cp_cv + down_frac*prop[i_down].cp_cv;
+            R = up_frac*prop[i_up].gas_const + down_frac*prop[i_down].gas_const;
+        } else {
+            T_up = prop[i_up].temperature;
+            k = prop[i_up].cp_cv;
+            R = prop[i_up].gas_const;
+        }
+
         let P_up = prop[i_up].pressure;
-        let T_up = prop[i_up].temperature;
-        let k = prop[i_up].cp_cv;
-        let R = prop[i_up].gas_const;
         let P_down = prop[i_down].pressure;
+        // let T_up = prop[i_up].temperature;
+        // let k = prop[i_up].cp_cv;
+        // let R = prop[i_up].gas_const;
 
         let kp = k + 1.0;
         let km = k - 1.0;
@@ -242,9 +266,9 @@ impl Connector for Valve {
         } else {
             "backward"
         };
-        //discharge_coeff( lift_diam: f64, area:f64, throat_area: f64, direction: &str )
+
         let cd = (self.discharge_coeff)( lift_diam, self.area, thoat_area, direction );
-        // println!("cd: {}", cd);
+
         // estimating mass flow
         if P_du > (2.0 / kp).powf(k / km) {
             m_dot = cd * thoat_area * P_up / (R * T_up).sqrt()
@@ -273,7 +297,7 @@ impl Connector for Valve {
         };
         let ii = i; // store the position to use in the downstream
         self.flow_ratio[i].1.mass_flow = -m_dot;
-        self.flow_ratio[i].1.enthalpy_flow = -m_dot * k * R / km * prop[i_up].temperature;
+        self.flow_ratio[i].1.enthalpy_flow = -m_dot * k * R / km * T_up;
 
         // updating `flow_ratio` for downstream objects
         let i = match self
@@ -294,7 +318,14 @@ impl Connector for Valve {
         };
         self.flow_ratio[i].1.mass_flow = -self.flow_ratio[ii].1.mass_flow;
         self.flow_ratio[i].1.enthalpy_flow = -self.flow_ratio[ii].1.enthalpy_flow;
+
+        // Add back-flow if necessary: index 0 is always cylinder
+        self.backflow_mass += -self.flow_ratio[0].1.mass_flow*dt;
+        if self.backflow_mass < 0.0 {
+            self.backflow_mass = 0.0;
+        }
     }
+
     fn get_flow_ratio<'a>(&'a self, elem_name: &str) -> Result<&'a FlowRatio, String> {
         match self
             .flow_ratio
@@ -313,39 +344,21 @@ impl Connector for Valve {
 
 impl SaveData for Valve {
     fn get_headers(&self) -> String {
-        "crank-angle [deg]\tmass flow [kg/s]\tenthalpy flow [J/s]\tthroat area [cm²]".to_string()
+        "crank-angle [deg]\tmass flow [kg/s]\tenthalpy flow [J/s]\tthroat area [cm²]\tbackflow [mg]".to_string()
     }
     fn num_storable_variables(&self) -> usize {
-        4
+        5
     }
     fn get_storable_data(&self) -> Array1<f64> {
         array![
             self.angle,
             self.flow_ratio[0].1.mass_flow,
             self.flow_ratio[0].1.enthalpy_flow,
-            self.throat_area * 1e4
+            self.throat_area * 1e4,
+            self.backflow_mass * 1e6,
         ]
     }
 }
-
-// impl Clone for Valve {
-//     fn clone(&self) -> Self {
-//         Valve{
-//             name: self.name.clone(),
-//             angle: self.angle,
-//             opening_angle: self.opening_angle,
-//             closing_angle: self.closing_angle,
-//             delta_angle: self.delta_angle,
-//             diameter: self.diameter,
-//             max_lift: self.max_lift,
-//             discharge_coeff: self.discharge_coeff.clone(),
-//             valve_lift: ValveLift,
-//             throat_area: f64,
-//             flow_ratio: Vec<(String, FlowRatio)>,
-//             connecting: Vec<String>,
-//         }
-//     }
-// }
 
 impl Conn for Valve {}
 
