@@ -1,11 +1,11 @@
 //! # lmb_engine_simulator
 //!
-//! The `lmb_engine_simulator` crate provides an easy way to simulate engines and 1D gas dynamics.
+//! The `lmb_engine_simulator` crate provides an easy way to simulate internal combustion engines.
 //!
 //! This library employed the **Builder Pattern** so the user feels as she/he is acctually building
-//! an engine system. To construct (build) the system, the struct `SystemBuilder`
+//! an engine system. To construct (build) the system, the struct [`SystemBuilder`](core/system_builder/struct.SystemBuilder.html)
 //! is used to add the desired components. After finishing building, the method `build_system()` can
-//! be used to return an object `System` which is used to solve the components numerically.
+//! be used to return an object [`System`](core/system/struct.System.html) which is used to solve the components numerically.
 //!
 //! ## Current stage
 //!
@@ -27,30 +27,154 @@
 //! After the simulation is finished, all stored variables can only be accessed by writing them into a 
 //! file via system method [`write_to_file()`](core/system/struct.System.html#method.write_to_file) 
 //!
-//! ## Examples
+//! ### Example
+//! A simple system with a [Reservoir](zero_dim/reservoir/struct.Reservoir.html) and [Environment](zero_dim/environment/struct.Environment.html)
+//! connected by an [Orifice](connector/orifice/struct.Orifice.html) is created and simulated until steady state. After, the stored data is 
+//! written into two files.
 //! ```
-//! let mut gas_ambient = Gas::new("air.json");
-//! gas_ambient.TPX(293.0, 2.0*101325.0, "O2:0.21, N2:0.79");
-//! let mut gas_chamber = Gas::new("air.json");
-//! gas_chamber.TPX(293.0, 101325.0, "O2:0.21, N2:0.79");
-//! let mut builder = lmb::SystemBuilder::new();
-//! builder
-//!     .add_environment("ambient", &gas_ambient)
-//!     .add_reservoir("chamber", 500.0, &gas_chamber)
-//!     .add_orifice("orifice", 50.0, 0.9, vec!["ambient", "chamber"]);
+//! use lmb::Gas;
+//! use lmb_engine_simulator as lmb;
+//! 
+//! fn main() {
+//!     let mut gas_ambient = Gas::new("air.json");
+//!     gas_ambient.TPX(293.0, 2.0*101325.0, "O2:0.21, N2:0.79");
+//!     let mut gas_chamber = Gas::new("air.json");
+//!     gas_chamber.TPX(293.0, 101325.0, "O2:0.21, N2:0.79");
+//!     let mut builder = lmb::SystemBuilder::new();
+//!     builder
+//!         .add_environment("ambient", &gas_ambient)
+//!         .add_reservoir("chamber", 500.0, &gas_chamber)
+//!         .add_orifice("orifice", 50.0, 0.9, vec!["ambient", "chamber"]);
 //!
-//! let mut system = builder.build_system();
+//!     let mut system = builder.build_system();
 //!    
-//! // Calculating
-//! system.advance_to_steady_state();
+//!     // Calculating
+//!     system.advance_to_steady_state();
 //!    
-//! // Writting data
-//! system.write_to_file("chamber.txt", "chamber", None);
-//! system.write_to_file("orifice.txt", "orifice", None);
+//!     // Writting data
+//!     system.write_to_file("chamber.txt", "chamber", None);
+//!     system.write_to_file("orifice.txt", "orifice", None);
+//! }
+
 //! ```
 //! 
-//! ## Simulation with engines
-//! Simulations with engines are a bit more complex and are treated in details at [Engine Examples](doc/Ryobi_26cm3_engine/index.html)
+//! ## Simulating engines
+//! 
+//! To add an engine to the system, the method [`add_engine("engine_file.json", "gas")`](core/system_builder/struct.SystemBuilder.html#method.add_engine)
+//! of `SystemBuilder` must be used. The `engine_file.json` is read into the struct [`json_engine`](engine/json_reader/struct.JsonEngine.html). 
+//! This file **must** have at least the following attributes:
+//! * "speed" in RPM,
+//! * "eccentricity" in mm,
+//! * "conrod" in mm,
+//! * "displacement" in cm³,
+//! * "bore" in mm,
+//! * "firing_order" as a string - i.e "1-3-2",
+//! * "cylinders" as a vector of structs [`json_cylinder`](engine/json_reader/struct.JsonCylinder.html)
+//! 
+//! All possible attributes of the `engine_file.json` file can be found at the full documentation at [`Json Reader`](engine/json_reader/index.html).
+//! **Attention when entering the variables in crank-angle degree!** The reference, where crank-angle is zero, 
+//! is at top-dead-center (TDC) of compression phase and it only accepts positive numbers. 
+//! Therefore, the full cycle starts in 0 CA-deg and finishes at 720 CA-deg. 
+//! 
+//! ### Example
+//! Let's simulate a simple engine system with intake and exhaust manifolds as [environments](zero_dim/environment/struct.Environment.html)
+//! connected to a single cylinder through only two valves (intake and exhaust). The `engine.json` file will be
+//! ```
+//! {
+//!     "speed": 3000.0,
+//!     "eccentricity": 0.0,
+//!     "conrod": 145.6,
+//!     "displacement": 400.0,
+//!     "bore": 80.0,
+//!     "firing_order": "1",
+//!     "combustion": {
+//!         "model": "Two-zone model",        
+//!         "comb_ini": 690.0,
+//!         "wiebe": {
+//!             "m": 2.0,
+//!             "a": 6.908,
+//!             "comb_duration": 40.0
+//!         }
+//!     },
+//!     "injector": {
+//!         "inj_type": "port",
+//!         "air_fuel_ratio": 1.0,
+//!         "fuel": {
+//!             "name": "C2H5OH",
+//!             "state": "liquid",
+//!             "lhv": 25.858e06,
+//!             "heat_vap": 900.0e3
+//!         }
+//!     },
+//!     "cylinders": [
+//!         {
+//!             "name": "cyl_1",
+//!             "compression_ratio": 12.50,
+//!             "wall_temperature": 520.0,
+//!             "store_species": true,
+//!             "intake_valves": [
+//!                 {
+//!                     "name": "valve_int",
+//!                     "opening_angle": 340.0,
+//!                     "closing_angle": 570.0,
+//!                     "diameter": 30.93,
+//!                     "max_lift": 9.30
+//!                 }
+//!             ],
+//!             "exhaust_valves": [
+//!                 {
+//!                     "name": "valve_exh",
+//!                     "opening_angle": 130.0,
+//!                     "closing_angle": 375.0,
+//!                     "diameter": 28.27,
+//!                     "max_lift": 8.48
+//!                 }
+//!             ]
+//!         }
+//!     ]
+//! }
+//! ```
+//! 
+//! In this example, we added an [`injector`](engine/json_reader/struct.JsonInjector.html), with relative air fuel ratio equal 1.0 
+//! and ethanol (C2H5OH) as fuel, and a [`combustion`](engine/json_reader/struct.JsonCombustion.html) model. 
+//! If they are not added, the engine will run as a motoring. 
+//! Right now, the **only combustion model implemented** is the "Two-zone model". Notice that the 
+//! [`cylinder`](engine/json_reader/struct.JsonCylinder.html) requires both intake and exhaust [`valves`](engine/json_reader/struct.JsonValve.html) 
+//! connected to it. In the `main.rs`, we will need to connect these valves to their ports with 
+//! [`connect_from_to("valve_name", "object_name")`](core/system_builder/struct.SystemBuilder.html#method.connect_from_to) method.
+//! 
+//! The `main.rs` can be written as: 
+//! 
+//! ```
+//! use lmb::Gas;
+//! use lmb_engine_simulator as lmb;
+//!
+//! fn main() {
+//!     let gas_intake = Gas::new("air.json");
+//!     let mut gas_exhaust = Gas::new("air.json");
+//!     gas_exhaust.TPX(500.0, 101325.0, "N2:0.662586, H2O:0.202449, CO2:0.134965");
+//!     let mut builder = lmb::SystemBuilder::new();
+//!     builder
+//!         .add_engine("engine.json", &gas_intake)
+//!         .add_environment("intake_port", &gas_intake)
+//!         .add_environment("exhaust_port", &gas_exhaust)
+//!         .connect_from_to("valve_int", "intake_port")
+//!         .connect_from_to("valve_exh", "exhaust_port");
+//!
+//!     let mut system = builder.build_system();
+//!    
+//!     // Calculating
+//!     system.advance_to_steady_state();
+//!    
+//!     // Writting data
+//!     system.write_to_file("cylinder.txt", "cyl_1", None);
+//!     system.write_to_file("intake_valve.txt", "valve_int", None);
+//!     system.write_to_file("exhaust_valve.txt", "valve_exh", None);
+//! }
+//! ```
+//! 
+//! For a real-life engine simulation, see [Engine Examples](doc/Ryobi_26cm3_engine/index.html)
+
 
 use crate::base::constants::MAX_ARRAY_LEN;
 use ndarray::*;

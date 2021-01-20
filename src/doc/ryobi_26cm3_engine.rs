@@ -109,4 +109,3 @@
 //! }
 //! ```
 //!
-//! ![Image](simulated_power.png)

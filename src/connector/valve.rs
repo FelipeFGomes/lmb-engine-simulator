@@ -8,6 +8,7 @@ use std::io::Write;
 use std::rc::Rc;
 // use crate::ObjectType;
 
+/// Connector struct representing a poppet valve of an engine
 #[derive(Clone)]
 pub struct Valve {
     name: String,
@@ -22,7 +23,7 @@ pub struct Valve {
     valve_lift: ValveLift,
     throat_area: f64,
     flow_ratio: Vec<(String, FlowRatio)>,
-    backflow_mass: f64, 
+    backflow_mass: f64,
     connecting: Vec<String>,
 }
 
@@ -48,7 +49,6 @@ impl Valve {
         flow_ratio.push((cylinder.name().to_string(), FlowRatio::new()));
         let valve_lift = ValveLift::new(max_lift_diam_ratio, time_opened);
         let discharge_coeff = Rc::new(Valve::default_discharge_coeff);
-        
         Ok(Valve {
             name,
             angle: 0.0,
@@ -56,7 +56,7 @@ impl Valve {
             closing_angle,
             delta_angle,
             diameter,
-            area: 0.25*std::f64::consts::PI*diameter*diameter,
+            area: 0.25 * std::f64::consts::PI * diameter * diameter,
             discharge_coeff,
             max_lift,
             valve_lift,
@@ -67,28 +67,32 @@ impl Valve {
         })
     }
 
-    fn default_discharge_coeff(lift_diam: f64, area:f64, throat_area: f64, direction: &str) -> f64 {
+    fn default_discharge_coeff(
+        lift_diam: f64,
+        area: f64,
+        throat_area: f64,
+        direction: &str,
+    ) -> f64 {
         if throat_area < 1e-10 {
             return 0.0;
         }
         if direction == "forward" {
-            let cd_norm = 7.060033E+01 * lift_diam.powi(4) 
-                + -5.348961E+01*lift_diam.powi(3)
-                + 8.324442E+00*lift_diam.powi(2)
-                + 2.341224E+00*lift_diam;
-            cd_norm*area/throat_area
+            let cd_norm = 7.060033E+01 * lift_diam.powi(4)
+                + -5.348961E+01 * lift_diam.powi(3)
+                + 8.324442E+00 * lift_diam.powi(2)
+                + 2.341224E+00 * lift_diam;
+            cd_norm * area / throat_area
         } else {
-            let cd_norm = 5.848379E+01*lift_diam.powi(4) 
-                + -4.168971E+01*lift_diam.powi(3)
-                + 4.793636E+00*lift_diam.powi(2)
-                + 2.759528E+00*lift_diam;
-            cd_norm*area/throat_area
+            let cd_norm = 5.848379E+01 * lift_diam.powi(4)
+                + -4.168971E+01 * lift_diam.powi(3)
+                + 4.793636E+00 * lift_diam.powi(2)
+                + 2.759528E+00 * lift_diam;
+            cd_norm * area / throat_area
         }
     }
 
     fn calc_throat_area(&self, lift_diam: f64) -> f64 {
         let lift = lift_diam * self.diameter;
-        
         if lift_diam <= 0.125 {
             2.22144146908 * lift * (self.diameter + 0.5 * lift)
         } else if lift_diam <= 0.274049 {
@@ -142,7 +146,7 @@ impl Valve {
                 }
                 let lift_diam = self.valve_lift.calc_lift(angle_cam);
                 area = self.calc_throat_area(lift_diam);
-                lift =  lift_diam * self.diameter;
+                lift = lift_diam * self.diameter;
             } else {
                 area = 0.0;
                 lift = 0.0;
@@ -201,7 +205,7 @@ impl Connector for Valve {
         self.angle = crank_angle;
         let thoat_area: f64;
         let lift_diam: f64; // lift/diam
-        // checking if valve is open
+                            // checking if valve is open
         if self.is_open(crank_angle) {
             let delta = crank_angle - self.opening_angle;
             let angle = if delta >= 0.0 { delta } else { delta + 720.0 };
@@ -241,9 +245,9 @@ impl Connector for Valve {
             // R = self.backflow_gas.R();
             let up_frac = 0.5;
             let down_frac = 1.0 - up_frac;
-            T_up = up_frac*prop[i_up].temperature + down_frac*prop[i_down].temperature;
-            k = up_frac*prop[i_up].cp_cv + down_frac*prop[i_down].cp_cv;
-            R = up_frac*prop[i_up].gas_const + down_frac*prop[i_down].gas_const;
+            T_up = up_frac * prop[i_up].temperature + down_frac * prop[i_down].temperature;
+            k = up_frac * prop[i_up].cp_cv + down_frac * prop[i_down].cp_cv;
+            R = up_frac * prop[i_up].gas_const + down_frac * prop[i_down].gas_const;
         } else {
             T_up = prop[i_up].temperature;
             k = prop[i_up].cp_cv;
@@ -260,14 +264,15 @@ impl Connector for Valve {
         let km = k - 1.0;
         let P_du = P_down / P_up;
         let m_dot: f64;
-        
-        let direction = if prop[i_down].name == self.connecting[0] { //self.connecting[0] is cylinder
+
+        let direction = if prop[i_down].name == self.connecting[0] {
+            //self.connecting[0] is cylinder
             "forward"
         } else {
             "backward"
         };
 
-        let cd = (self.discharge_coeff)( lift_diam, self.area, thoat_area, direction );
+        let cd = (self.discharge_coeff)(lift_diam, self.area, thoat_area, direction);
 
         // estimating mass flow
         if P_du > (2.0 / kp).powf(k / km) {
@@ -275,7 +280,8 @@ impl Connector for Valve {
                 * (2.0 * k / km * (P_du.powf(2.0 / k) - P_du.powf(kp / k))).sqrt();
         } else {
             // chocked flow: independent of downstream pressure
-            m_dot = cd * thoat_area * P_up / (R * T_up).sqrt() * (k * (2.0 / kp).powf(kp / km)).sqrt();
+            m_dot =
+                cd * thoat_area * P_up / (R * T_up).sqrt() * (k * (2.0 / kp).powf(kp / km)).sqrt();
         }
 
         // updating `flow_ratio` for upstream objects
@@ -320,7 +326,7 @@ impl Connector for Valve {
         self.flow_ratio[i].1.enthalpy_flow = -self.flow_ratio[ii].1.enthalpy_flow;
 
         // Add back-flow if necessary: index 0 is always cylinder
-        self.backflow_mass += -self.flow_ratio[0].1.mass_flow*dt;
+        self.backflow_mass += -self.flow_ratio[0].1.mass_flow * dt;
         if self.backflow_mass < 0.0 {
             self.backflow_mass = 0.0;
         }
@@ -344,7 +350,8 @@ impl Connector for Valve {
 
 impl SaveData for Valve {
     fn get_headers(&self) -> String {
-        "crank-angle [deg]\tmass flow [kg/s]\tenthalpy flow [J/s]\tthroat area [cm²]\tbackflow [mg]".to_string()
+        "crank-angle [deg]\tmass flow [kg/s]\tenthalpy flow [J/s]\tthroat area [cm²]\tbackflow [mg]"
+            .to_string()
     }
     fn num_storable_variables(&self) -> usize {
         5

@@ -4,6 +4,7 @@ use crate::core::traits::{Conn, Connector, SaveData};
 use crate::{BasicProperties, FlowRatio};
 use ndarray::*;
 
+/// Connector struct that connects two [`zero_dim`](../../zero_dim/index.html) objects by an orifice
 pub struct Orifice {
     name: String,
     area: f64,

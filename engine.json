@@ -1,9 +1,9 @@
 {
     "speed": 3000.0,
-    "eccentricity": 6.9,
+    "eccentricity": 0.0,
     "conrod": 145.6,
     "displacement": 400.0,
-    "bore": 75.0,
+    "bore": 80.0,
     "firing_order": "1",
     "combustion": {
         "model": "Two-zone model",        
@@ -16,7 +16,7 @@
     },
     "injector": {
         "inj_type": "port",
-        "air_fuel_ratio": 0.88,
+        "air_fuel_ratio": 1.0,
         "fuel": {
             "name": "C2H5OH",
             "state": "liquid",
@@ -27,39 +27,25 @@
     "cylinders": [
         {
             "name": "cyl_1",
-            "compression_ratio": 12.25,
+            "compression_ratio": 12.50,
             "wall_temperature": 520.0,
             "store_species": true,
             "intake_valves": [
                 {
-                    "name": "valve_int_1",
+                    "name": "valve_int",
                     "opening_angle": 340.0,
                     "closing_angle": 570.0,
-                    "diameter": 27.0,
-                    "max_lift": 8.6
-                },
-                {
-                    "name": "valve_int_2",
-                    "opening_angle": 340.0,
-                    "closing_angle": 570.0,
-                    "diameter": 27.0,
-                    "max_lift": 8.6
+                    "diameter": 30.93,
+                    "max_lift": 9.30
                 }
             ],
             "exhaust_valves": [
-                {   
-                    "name": "valve_exh_1",
+                {
+                    "name": "valve_exh",
                     "opening_angle": 130.0,
-                    "closing_angle": 360.0,
-                    "diameter": 23.53,
-                    "max_lift": 8.3
-                },
-                {   
-                    "name": "valve_exh_2",
-                    "opening_angle": 130.0,
-                    "closing_angle": 360.0,
-                    "diameter": 23.53,
-                    "max_lift": 8.3
+                    "closing_angle": 375.0,
+                    "diameter": 28.27,
+                    "max_lift": 8.48
                 }
             ]
         }

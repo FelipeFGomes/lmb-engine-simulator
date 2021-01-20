@@ -4,6 +4,7 @@ use crate::{BasicProperties, FlowRatio};
 use crate::numerics::ode_solvers as ode;
 use ndarray::*;
 
+/// Zero-Dimensional chamber of finite volume. Gas composition is assumed constant.
 pub struct Reservoir {
     name: String,
     gas: Gas,

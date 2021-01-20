@@ -10,6 +10,7 @@ use ndarray::*;
 use std::f64::consts::PI;
 use std::io::Write;
 
+/// Zero-Dimensional struct representing the cylinder of an engine. 
 pub struct Cylinder {
     name: String,
     gas: Gas,

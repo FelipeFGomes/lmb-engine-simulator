@@ -1,8 +1,9 @@
-use ndarray::*;
+use crate::core::traits::{SaveData, ZeroD, ZeroDim};
 use crate::reaction::gas::Gas;
-use crate::core::traits::{ZeroDim, SaveData, ZeroD};
 use crate::{BasicProperties, FlowRatio};
+use ndarray::*;
 
+/// Zero-Dimensional struct with constant pressure, temperature and composition.
 pub struct Environment {
     name: String,
     gas: Gas,
@@ -16,11 +17,13 @@ impl Environment {
             gas: gas.clone(),
             _mass: std::f64::INFINITY,
         })
-    } 
+    }
 }
 
-impl ZeroDim for Environment { 
-    fn name<'a>(&'a self) -> &'a str {&self.name}
+impl ZeroDim for Environment {
+    fn name<'a>(&'a self) -> &'a str {
+        &self.name
+    }
     fn get_state(&self) -> BasicProperties {
         BasicProperties {
             name: self.name(),
@@ -41,9 +44,11 @@ impl SaveData for Environment {
     fn get_headers(&self) -> String {
         "pressure [bar]\ttemperature [K]".to_string()
     }
-    fn num_storable_variables(&self) -> usize {2}
+    fn num_storable_variables(&self) -> usize {
+        2
+    }
     fn get_storable_data(&self) -> Array1<f64> {
-        array![self.gas.P()/1e5, self.gas.T()]
+        array![self.gas.P() / 1e5, self.gas.T()]
     }
 }
 
