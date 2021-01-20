@@ -4,8 +4,8 @@
 //!
 //! This library employed the **Builder Pattern** so the user feels as she/he is acctually building
 //! an engine system. To construct (build) the system, the struct [`SystemBuilder`](core/system_builder/struct.SystemBuilder.html)
-//! is used to add the desired components. After finishing building, the method `build_system()` can
-//! be used to return an object [`System`](core/system/struct.System.html) which is used to solve the components numerically.
+//! is used to add the desired components. After finishing building, the method [`build_system()`](core/system_builder/struct.SystemBuilder.html#method.build_system())
+//! can be used to return an object [`System`](core/system/struct.System.html) which is used to solve the components numerically.
 //!
 //! ## Current stage
 //!
@@ -13,7 +13,7 @@
 //! The basic logic of the program is to use the `SystemBuilder` to build all the objects and then
 //! indicate how the objects are connected with each other. Basicly, all of the dimensional objects
 //! require a `Gas` to be created and a `Gas` object is created from a .json file. Currently, the
-//! only available one is `air.json`. However, they were made in a way to be easily contructed.
+//! only available one is `air.json` (found in the source code). However, they were made in a way to be easily contructed.
 //! Once all dimensional objects and connections were added, the `SystemBuilder` object can use the
 //! method `build_system()` to create an object of type `System`, which will carry all the
 //! [Zero Dimensional](zero_dim/index.html) and [Connector](connector/index.html) objects. The `System`
@@ -72,6 +72,7 @@
 //! * "cylinders" as a vector of structs [`json_cylinder`](engine/json_reader/struct.JsonCylinder.html)
 //! 
 //! All possible attributes of the `engine_file.json` file can be found at the full documentation at [`Json Reader`](engine/json_reader/index.html).
+//! and an example can be found in the source as `engine.json`. 
 //! **Attention when entering the variables in crank-angle degree!** The reference, where crank-angle is zero, 
 //! is at top-dead-center (TDC) of compression phase and it only accepts positive numbers. 
 //! Therefore, the full cycle starts in 0 CA-deg and finishes at 720 CA-deg. 

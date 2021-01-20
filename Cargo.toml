@@ -5,6 +5,8 @@ authors = ["Felipe A. F. Gomes, f.augustofgomes@gmail.com"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
 description = "The lmb_engine_simulator library provides an easy way to simulate internal combustion engines"
+repository = "https://github.com/FelipeFGomes/lmb-engine-simulator"
+documentation = "https://docs.rs/lmb_engine_simulator"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
